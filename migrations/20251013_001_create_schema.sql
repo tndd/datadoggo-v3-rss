@@ -1,0 +1,2 @@
+-- スキーマ作成
+CREATE SCHEMA IF NOT EXISTS rss;
