@@ -1,6 +1,9 @@
 # datadoggo-v2-rss
 rssフィードを元に情報を集め、dbへの保存を行う。
-dbはpsqlとする。schema名は`rss`。
+
+dbはpsqlを使用する。
+- databaseは`datadoggo-v3`
+- schema名は`rss`
 
 # テーブル定義
 Option指定なき場合、NOT NULL制約とする。
