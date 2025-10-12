@@ -1,1 +1,8 @@
 .env
+
+# Added by cargo
+/target
+Cargo.lock
+
+# sqlx
+.sqlx
