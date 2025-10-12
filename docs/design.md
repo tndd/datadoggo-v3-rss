@@ -14,7 +14,7 @@ linkフィールドについては、blueskyのような例外があるので注
 
 | name        | type        | description                        |
 | ----------- | ----------- | ---------------------------------- |
-| id          | text(PK)    | URLのhash                          |
+| id          | uuid(PK)    | ---                                |
 | created_at  | timestampz  | 作成日時が入る                     |
 | updated_at  | timestampz  | 最終更新日時                       |
 | link        | text        | rssフィールドのlink                |
@@ -30,7 +30,7 @@ status_codeが200の場合しかここにデータは保存されない。
 
 | name       | type       | description |
 | ---------- | ---------- | ----------- |
-| queue_id   | text       | queueのid   |
+| queue_id   | uuid       | queueのid   |
 | created_at | timestampz | ---         |
 | updated_at | timestampz | ---         |
 | data       | bytes      | Brotli形式  |
@@ -54,7 +54,7 @@ queueにarticle_contentをjoinしたもの。
 
 | name        | type        | description                |
 | ----------- | ----------- | -------------------------- |
-| id          | text(PK)    | URLのhash                  |
+| id          | uuid(PK)    | queueのidが入ることになる  |
 | created_at  | timestampz  | queueの生成日時            |
 | updated_at  | timestampz  | queueの最終更新日時        |
 | link        | text        | rssフィールドのlink        |
