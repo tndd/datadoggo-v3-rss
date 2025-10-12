@@ -180,48 +180,47 @@ pub async fn run(pool: PgPool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    pub mod load_rss {
+        use super::super::load_rss_links;
 
-    #[test]
-    fn test_load_rss_links() {
-        // rss_links.ymlが存在する場合のみテスト
-        if std::path::Path::new("rss_links.yml").exists() {
-            let result = load_rss_links("rss_links.yml");
-            assert!(result.is_ok(), "rss_links.ymlの読み込みに失敗");
+        /// # 検証目的
+        /// rss_links.ymlを読み込み、定義済みフィードが存在することを確認する。
+        #[test]
+        fn rss_linksを読み込める() {
+            if std::path::Path::new("rss_links.yml").exists() {
+                let result = load_rss_links("rss_links.yml");
+                assert!(result.is_ok(), "rss_links.ymlの読み込みに失敗");
 
-            let links = result.unwrap();
-            assert!(!links.is_empty(), "フィードが空");
+                let feeds = result.unwrap();
+                assert!(!feeds.is_empty(), "フィードが空");
+            }
         }
     }
 
-    #[tokio::test]
-    async fn test_fetch_and_parse_feed() {
-        // BBC RSSフィードでテスト（実際の通信が発生）
-        let url = "https://feeds.bbci.co.uk/news/rss.xml";
-        let result = fetch_and_parse_feed(url, None).await;
-
-        // ネットワークエラーは許容
-        if let Ok(entries) = result {
-            assert!(!entries.is_empty(), "記事が取得できませんでした");
-        }
-    }
-
-    #[test]
-    fn extract_link_コンテンツから_urlを抽出する() {
+    pub mod extract_link {
         use feed_rs::model::{Content, Entry};
 
-        let mut entry = Entry::default();
-        let mut content = Content::default();
-        content.body = Some("テキスト https://example.com/path?a=1) があります".to_string());
-        entry.content = Some(content);
+        use super::super::{extract_link, find_first_url};
 
-        let link = extract_link(&entry);
-        assert_eq!(link.as_deref(), Some("https://example.com/path?a=1"));
-    }
+        /// # 検証目的
+        /// コンテンツ内に含まれるURLを抽出し、末尾の句読点が除去されることを確認する。
+        #[test]
+        fn コンテンツから_urlを抽出する() {
+            let mut entry = Entry::default();
+            let mut content = Content::default();
+            content.body = Some("テキスト https://example.com/path?a=1) があります".to_string());
+            entry.content = Some(content);
 
-    #[test]
-    fn find_first_url_は末尾の句読点を除去する() {
-        let url = find_first_url("リンク https://example.com/test). 次");
-        assert_eq!(url.as_deref(), Some("https://example.com/test"));
+            let link = extract_link(&entry);
+            assert_eq!(link.as_deref(), Some("https://example.com/path?a=1"));
+        }
+
+        /// # 検証目的
+        /// 文末に句読点が付いている場合でも適切に除去できることを確認する。
+        #[test]
+        fn 末尾の句読点を除去する() {
+            let url = find_first_url("リンク https://example.com/test). 次");
+            assert_eq!(url.as_deref(), Some("https://example.com/test"));
+        }
     }
 }

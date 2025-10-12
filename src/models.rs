@@ -50,21 +50,15 @@ impl RssLinks {
 
         for (group, entries) in self.groups {
             for (name, entry) in entries {
-                let (url, wait_for_selector, timeout) = match entry {
-                    RssLinkEntry::Url(url) => (url, None, None),
-                    RssLinkEntry::Detailed {
-                        url,
-                        wait_for_selector,
-                        timeout,
-                    } => (url, wait_for_selector, timeout),
+                let url = match entry {
+                    RssLinkEntry::Url(url) => url,
+                    RssLinkEntry::Detailed { url, .. } => url,
                 };
 
                 feeds.push(RssFeedSource {
                     group: group.clone(),
                     name,
                     url,
-                    wait_for_selector,
-                    timeout,
                 });
             }
         }
@@ -78,8 +72,6 @@ pub struct RssFeedSource {
     pub group: String,
     pub name: String,
     pub url: String,
-    pub wait_for_selector: Option<String>,
-    pub timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,9 +81,9 @@ enum RssLinkEntry {
     Detailed {
         url: String,
         #[serde(default)]
-        wait_for_selector: Option<String>,
+        _wait_for_selector: Option<String>,
         #[serde(default)]
-        timeout: Option<u64>,
+        _timeout: Option<u64>,
     },
 }
 
@@ -110,8 +102,4 @@ pub struct ScrapeRequest {
 pub struct ScrapeResponse {
     pub html: String,
     pub status_code: i32,
-    pub title: String,
-    pub final_url: String,
-    pub elapsed_ms: f64,
-    pub timestamp: String,
 }
