@@ -1,18 +1,26 @@
-use anyhow::Result;
-use feed_rs::parser;
-use sqlx::PgPool;
+use std::collections::BTreeMap;
 use std::fs;
-use crate::models::{NewQueue, RssLinks};
+
+use anyhow::Result;
+use feed_rs::{model::Entry, parser};
+use once_cell::sync::Lazy;
+use regex::Regex;
+use sqlx::PgPool;
+
+use crate::models::{NewQueue, RssFeedSource, RssLinks};
+
+static URL_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"https?://[^\s\"'<>()]+"#).expect("URL正規表現のコンパイルに失敗"));
 
 /// rss_links.ymlを読み込む
-pub fn load_rss_links(path: &str) -> Result<RssLinks> {
+pub fn load_rss_links(path: &str) -> Result<Vec<RssFeedSource>> {
     let content = fs::read_to_string(path)?;
     let links: RssLinks = serde_yaml::from_str(&content)?;
-    Ok(links)
+    Ok(links.into_sources())
 }
 
 /// RSSフィードを取得してパース
-pub async fn fetch_and_parse_feed(url: &str) -> Result<Vec<NewQueue>> {
+pub async fn fetch_and_parse_feed(url: &str, group: Option<&str>) -> Result<Vec<NewQueue>> {
     let response = reqwest::get(url).await?;
     let content = response.bytes().await?;
     let feed = parser::parse(&content[..])?;
@@ -20,11 +28,9 @@ pub async fn fetch_and_parse_feed(url: &str) -> Result<Vec<NewQueue>> {
     let mut entries = Vec::new();
 
     for entry in feed.entries {
-        let link = entry
-            .links
-            .first()
-            .map(|l| l.href.clone())
-            .unwrap_or_default();
+        let Some(link) = extract_link(&entry) else {
+            continue;
+        };
 
         let title = entry
             .title
@@ -36,9 +42,7 @@ pub async fn fetch_and_parse_feed(url: &str) -> Result<Vec<NewQueue>> {
         let description = entry
             .summary
             .map(|t| t.content)
-            .or_else(|| {
-                entry.content.and_then(|c| c.body)
-            })
+            .or_else(|| entry.content.and_then(|c| c.body))
             .unwrap_or_else(String::new);
 
         entries.push(NewQueue {
@@ -46,11 +50,47 @@ pub async fn fetch_and_parse_feed(url: &str) -> Result<Vec<NewQueue>> {
             title,
             pub_date,
             description,
-            group: None,
+            group: group.map(|g| g.to_string()),
         });
     }
 
     Ok(entries)
+}
+
+fn extract_link(entry: &Entry) -> Option<String> {
+    entry
+        .links
+        .iter()
+        .map(|link| link.href.trim())
+        .find(|href| !href.is_empty())
+        .map(|href| href.to_string())
+        .or_else(|| {
+            entry
+                .summary
+                .as_ref()
+                .and_then(|s| find_first_url(&s.content))
+        })
+        .or_else(|| {
+            entry
+                .content
+                .as_ref()
+                .and_then(|c| c.body.as_ref())
+                .and_then(|body| find_first_url(body))
+        })
+}
+
+fn find_first_url(text: &str) -> Option<String> {
+    let matched = URL_PATTERN.find(text)?;
+    let trimmed = matched
+        .as_str()
+        .trim_end_matches(|c: char| matches!(c, ')' | ']' | '"' | '\'' | ',' | '.' | ';'))
+        .to_string();
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 /// queueテーブルにupsert（INSERT or UPDATE）
@@ -75,7 +115,7 @@ pub async fn upsert_queue_entries(
                 description = EXCLUDED.description,
                 "group" = EXCLUDED."group",
                 updated_at = NOW()
-            "#
+            "#,
         )
         .bind(&entry.link)
         .bind(&entry.title)
@@ -94,20 +134,30 @@ pub async fn upsert_queue_entries(
 /// fetch-rssコマンドのメイン処理
 pub async fn run(pool: PgPool) -> Result<()> {
     println!("rss_links.ymlを読み込み中...");
-    let rss_links = load_rss_links("rss_links.yml")?;
+    let feeds = load_rss_links("rss_links.yml")?;
+
+    let mut grouped: BTreeMap<String, Vec<RssFeedSource>> = BTreeMap::new();
+    for feed in feeds {
+        grouped.entry(feed.group.clone()).or_default().push(feed);
+    }
+
+    if grouped.is_empty() {
+        println!("登録されているRSSフィードがありません");
+        return Ok(());
+    }
 
     let mut total_count = 0;
 
-    for (group_name, feeds) in rss_links.groups {
+    for (group_name, feeds) in grouped {
         println!("\nグループ: {}", group_name);
 
-        for (feed_name, url) in feeds {
-            print!("  - {} を取得中... ", feed_name);
+        for feed in feeds {
+            print!("  - {} を取得中... ", feed.name);
 
-            match fetch_and_parse_feed(&url).await {
+            match fetch_and_parse_feed(&feed.url, Some(&feed.group)).await {
                 Ok(entries) => {
                     let count = entries.len();
-                    match upsert_queue_entries(&pool, entries, Some(group_name.clone())).await {
+                    match upsert_queue_entries(&pool, entries, Some(feed.group.clone())).await {
                         Ok(_) => {
                             println!("✓ {}件の記事を処理", count);
                             total_count += count;
@@ -140,7 +190,7 @@ mod tests {
             assert!(result.is_ok(), "rss_links.ymlの読み込みに失敗");
 
             let links = result.unwrap();
-            assert!(!links.groups.is_empty(), "グループが空");
+            assert!(!links.is_empty(), "フィードが空");
         }
     }
 
@@ -148,11 +198,30 @@ mod tests {
     async fn test_fetch_and_parse_feed() {
         // BBC RSSフィードでテスト（実際の通信が発生）
         let url = "https://feeds.bbci.co.uk/news/rss.xml";
-        let result = fetch_and_parse_feed(url).await;
+        let result = fetch_and_parse_feed(url, None).await;
 
         // ネットワークエラーは許容
         if let Ok(entries) = result {
             assert!(!entries.is_empty(), "記事が取得できませんでした");
         }
+    }
+
+    #[test]
+    fn extract_link_コンテンツから_urlを抽出する() {
+        use feed_rs::model::{Content, Entry};
+
+        let mut entry = Entry::default();
+        let mut content = Content::default();
+        content.body = Some("テキスト https://example.com/path?a=1) があります".to_string());
+        entry.content = Some(content);
+
+        let link = extract_link(&entry);
+        assert_eq!(link.as_deref(), Some("https://example.com/path?a=1"));
+    }
+
+    #[test]
+    fn find_first_url_は末尾の句読点を除去する() {
+        let url = find_first_url("リンク https://example.com/test). 次");
+        assert_eq!(url.as_deref(), Some("https://example.com/test"));
     }
 }

@@ -40,7 +40,59 @@ pub struct NewQueue {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RssLinks {
     #[serde(flatten)]
-    pub groups: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    groups: std::collections::HashMap<String, std::collections::HashMap<String, RssLinkEntry>>,
+}
+
+impl RssLinks {
+    /// フラット化したフィード一覧を取得
+    pub fn into_sources(self) -> Vec<RssFeedSource> {
+        let mut feeds = Vec::new();
+
+        for (group, entries) in self.groups {
+            for (name, entry) in entries {
+                let (url, wait_for_selector, timeout) = match entry {
+                    RssLinkEntry::Url(url) => (url, None, None),
+                    RssLinkEntry::Detailed {
+                        url,
+                        wait_for_selector,
+                        timeout,
+                    } => (url, wait_for_selector, timeout),
+                };
+
+                feeds.push(RssFeedSource {
+                    group: group.clone(),
+                    name,
+                    url,
+                    wait_for_selector,
+                    timeout,
+                });
+            }
+        }
+
+        feeds
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RssFeedSource {
+    pub group: String,
+    pub name: String,
+    pub url: String,
+    pub wait_for_selector: Option<String>,
+    pub timeout: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RssLinkEntry {
+    Url(String),
+    Detailed {
+        url: String,
+        #[serde(default)]
+        wait_for_selector: Option<String>,
+        #[serde(default)]
+        timeout: Option<u64>,
+    },
 }
 
 /// スクレイピングAPIリクエスト

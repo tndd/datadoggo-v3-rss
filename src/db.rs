@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
 /// データベース接続プールを作成
 pub async fn create_pool(database_url: &str) -> Result<PgPool> {
