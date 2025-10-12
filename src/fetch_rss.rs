@@ -39,7 +39,7 @@ pub async fn fetch_and_parse_feed(url: &str) -> Result<Vec<NewQueue>> {
             .or_else(|| {
                 entry.content.and_then(|c| c.body)
             })
-            .unwrap_or_else(|| String::new());
+            .unwrap_or_else(String::new);
 
         entries.push(NewQueue {
             link,
@@ -79,7 +79,7 @@ pub async fn upsert_queue_entries(
         )
         .bind(&entry.link)
         .bind(&entry.title)
-        .bind(&entry.pub_date)
+        .bind(entry.pub_date)
         .bind(&entry.description)
         .bind(&group_value)
         .execute(pool)
