@@ -1,60 +1,108 @@
-use anyhow::Result;
-use sqlx::PgPool;
-use uuid::Uuid;
 use crate::models::{Queue, ScrapeRequest, ScrapeResponse};
+use anyhow::{anyhow, Context, Result};
+use reqwest::Client;
+use sqlx::{PgPool, Postgres, Transaction};
+use uuid::Uuid;
 
-/// モックスクレイピングAPI（開発用）
-/// URLのハッシュ値に基づいて成功/失敗をシミュレート
-async fn mock_scrape_api(url: &str) -> Result<ScrapeResponse> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+const DEFAULT_TIMEOUT_SECS: u64 = 15;
 
-    // URLのハッシュ値を計算して決定的な振る舞いを実現
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    let hash = hasher.finish();
+/// fetch-contentコマンドのメイン処理
+pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
+    println!("status_code=NULLのエントリを取得中...");
+    let entries = search_pending_queue_entries(&pool, limit).await?;
 
-    // ハッシュ値の下位ビットで成功率80%を実現
-    let status_code = if hash % 10 < 8 {
-        200 // 80%の確率で成功
-    } else if hash % 10 == 8 {
-        404 // 10%の確率で404
-    } else {
-        500 // 10%の確率で500
-    };
+    if entries.is_empty() {
+        println!("処理対象のエントリがありません");
+        return Ok(());
+    }
 
-    let html = if status_code == 200 {
-        format!("<html><body><h1>Mock content for {}</h1><p>This is a successful response.</p></body></html>", url)
-    } else {
-        format!("<html><body><h1>Error {}</h1></body></html>", status_code)
-    };
+    println!("{}件のエントリを処理します\n", entries.len());
 
-    Ok(ScrapeResponse {
-        html,
-        status_code,
-        title: format!("Mock Title for {}", url),
-        final_url: url.to_string(),
-        elapsed_ms: 100.0 + (hash % 500) as f64, // 100-600ms
-        timestamp: chrono::Utc::now().to_rfc3339(),
-    })
+    let client = Client::new();
+    let mut saved_count = 0;
+    let mut status_only_count = 0;
+    let mut error_count = 0;
+
+    for entry in entries {
+        print!("  - {} ... ", entry.title);
+
+        let request = ScrapeRequest {
+            url: entry.link.clone(),
+            wait_for_selector: None,
+            timeout: Some(DEFAULT_TIMEOUT_SECS),
+        };
+
+        match call_scrape_api(&client, api_url, &request).await {
+            Ok(response) => {
+                if response.status_code == 200 {
+                    match persist_success(&pool, entry.id, &response.html, response.status_code)
+                        .await
+                    {
+                        Ok(_) => {
+                            println!("✓ 保存完了 (status: {})", response.status_code);
+                            saved_count += 1;
+                        }
+                        Err(e) => {
+                            println!("✗ 保存エラー: {}", e);
+                            error_count += 1;
+                        }
+                    }
+                } else {
+                    match persist_status_only(&pool, entry.id, response.status_code).await {
+                        Ok(_) => {
+                            println!("✓ status_codeのみ記録 (status: {})", response.status_code);
+                            status_only_count += 1;
+                        }
+                        Err(e) => {
+                            println!("✗ status_code更新エラー: {}", e);
+                            error_count += 1;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!("✗ APIエラー: {}", e);
+                error_count += 1;
+            }
+        }
+    }
+
+    println!(
+        "\n完了: 本文保存 {}件, statusのみ {}件, エラー {}件",
+        saved_count, status_only_count, error_count
+    );
+
+    Ok(())
 }
 
-/// スクレイピングAPIを呼び出し（本番環境用、今は未使用）
-#[allow(dead_code)]
-async fn call_scrape_api(api_url: &str, request: ScrapeRequest) -> Result<ScrapeResponse> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("{}/fetch", api_url))
-        .json(&request)
-        .send()
-        .await?;
+/// スクレイピングAPIを呼び出す
+async fn call_scrape_api(
+    client: &Client,
+    api_url: &str,
+    request: &ScrapeRequest,
+) -> Result<ScrapeResponse> {
+    let endpoint = format!("{}/fetch", api_url.trim_end_matches('/'));
+    let response = client.post(endpoint).json(request).send().await?;
 
-    let scrape_response: ScrapeResponse = response.json().await?;
+    let status = response.status();
+    let bytes = response.bytes().await?;
+
+    if !status.is_success() {
+        let body_preview = String::from_utf8_lossy(&bytes);
+        return Err(anyhow!(
+            "スクレイピングAPIがHTTP{}を返却: {}",
+            status.as_u16(),
+            body_preview
+        ));
+    }
+
+    let scrape_response: ScrapeResponse = serde_json::from_slice(&bytes)
+        .context("スクレイピングAPIレスポンスのJSONデコードに失敗")?;
     Ok(scrape_response)
 }
 
 /// HTMLをBrotli圧縮
-fn compress_html(html: &str) -> Result<Vec<u8>> {
+pub(crate) fn compress_html(html: &str) -> Result<Vec<u8>> {
     let mut compressed = Vec::new();
     let mut reader = html.as_bytes();
 
@@ -79,7 +127,7 @@ async fn search_pending_queue_entries(pool: &PgPool, limit: i64) -> Result<Vec<Q
         WHERE status_code IS NULL
         ORDER BY created_at ASC
         LIMIT $1
-        "#
+        "#,
     )
     .bind(limit)
     .fetch_all(pool)
@@ -89,24 +137,32 @@ async fn search_pending_queue_entries(pool: &PgPool, limit: i64) -> Result<Vec<Q
 }
 
 /// queueのstatus_codeを更新
-async fn update_queue_status(pool: &PgPool, id: Uuid, status_code: i32) -> Result<()> {
+async fn update_queue_status(
+    tx: &mut Transaction<'_, Postgres>,
+    id: Uuid,
+    status_code: i32,
+) -> Result<()> {
     sqlx::query(
         r#"
         UPDATE rss.queue
         SET status_code = $1, updated_at = NOW()
         WHERE id = $2
-        "#
+        "#,
     )
     .bind(status_code)
     .bind(id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
     Ok(())
 }
 
 /// article_contentに保存
-async fn save_article_content(pool: &PgPool, queue_id: Uuid, data: Vec<u8>) -> Result<()> {
+async fn save_article_content(
+    tx: &mut Transaction<'_, Postgres>,
+    queue_id: Uuid,
+    data: &[u8],
+) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO rss.article_content (queue_id, data)
@@ -115,112 +171,182 @@ async fn save_article_content(pool: &PgPool, queue_id: Uuid, data: Vec<u8>) -> R
         DO UPDATE SET
             data = EXCLUDED.data,
             updated_at = NOW()
-        "#
+        "#,
     )
     .bind(queue_id)
     .bind(data)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
     Ok(())
 }
 
-/// fetch-contentコマンドのメイン処理
-pub async fn run(pool: PgPool, limit: i64) -> Result<()> {
-    println!("status_code=NULLのエントリを取得中...");
-    let entries = search_pending_queue_entries(&pool, limit).await?;
+/// 取得結果が200のときの保存処理
+async fn persist_success(
+    pool: &PgPool,
+    queue_id: Uuid,
+    html: &str,
+    status_code: i32,
+) -> Result<()> {
+    let compressed = compress_html(html)?;
+    let mut tx = pool.begin().await?;
 
-    if entries.is_empty() {
-        println!("処理対象のエントリがありません");
-        return Ok(());
-    }
+    save_article_content(&mut tx, queue_id, &compressed).await?;
+    update_queue_status(&mut tx, queue_id, status_code).await?;
 
-    println!("{}件のエントリを処理します\n", entries.len());
+    tx.commit().await?;
+    Ok(())
+}
 
-    let mut success_count = 0;
-    let mut error_count = 0;
-
-    for entry in entries {
-        print!("  - {} ... ", entry.title);
-
-        // モックAPIを呼び出し
-        match mock_scrape_api(&entry.link).await {
-            Ok(response) => {
-                // status_codeを更新
-                if let Err(e) = update_queue_status(&pool, entry.id, response.status_code).await {
-                    println!("✗ status_code更新エラー: {}", e);
-                    error_count += 1;
-                    continue;
-                }
-
-                // status_code=200の場合のみコンテンツを保存
-                if response.status_code == 200 {
-                    match compress_html(&response.html) {
-                        Ok(compressed) => {
-                            if let Err(e) = save_article_content(&pool, entry.id, compressed).await {
-                                println!("✗ コンテンツ保存エラー: {}", e);
-                                error_count += 1;
-                            } else {
-                                println!("✓ 保存完了 (status: {})", response.status_code);
-                                success_count += 1;
-                            }
-                        }
-                        Err(e) => {
-                            println!("✗ 圧縮エラー: {}", e);
-                            error_count += 1;
-                        }
-                    }
-                } else {
-                    println!("✓ status_codeのみ記録 (status: {})", response.status_code);
-                    success_count += 1;
-                }
-            }
-            Err(e) => {
-                println!("✗ APIエラー: {}", e);
-                error_count += 1;
-            }
-        }
-    }
-
-    println!("\n完了: 成功 {}件, エラー {}件", success_count, error_count);
+/// 取得結果が非200のときの更新処理
+async fn persist_status_only(pool: &PgPool, queue_id: Uuid, status_code: i32) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    update_queue_status(&mut tx, queue_id, status_code).await?;
+    tx.commit().await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    pub mod run {
+        use std::io::{Cursor, Read};
 
-    #[tokio::test]
-    async fn test_mock_scrape_api() {
-        let result = mock_scrape_api("https://example.com").await;
-        assert!(result.is_ok(), "モックAPIの呼び出しに失敗");
+        use anyhow::Result;
+        use brotli::Decompressor;
+        use chrono::Utc;
+        use serde_json::json;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let response = result.unwrap();
-        assert_eq!(response.status_code, 200);
-        assert!(!response.html.is_empty());
+        use crate::fetch_content::run;
+
+        #[sqlx::test]
+        async fn 保存成功で記事が圧縮保存される(pool: PgPool) -> Result<()> {
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            let server = MockServer::start().await;
+            let html_body = "<html><body><p>ok</p></body></html>";
+
+            Mock::given(method("POST"))
+                .and(path("/fetch"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "html": html_body,
+                    "status_code": 200,
+                    "title": "Mock Title",
+                    "final_url": "https://example.com/",
+                    "elapsed_ms": 123.4,
+                    "timestamp": Utc::now().to_rfc3339(),
+                })))
+                .mount(&server)
+                .await;
+
+            let queue_id: Uuid = sqlx::query_scalar(
+                r#"
+                INSERT INTO rss.queue (link, title, description)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                "#,
+            )
+            .bind("https://example.com")
+            .bind("テストタイトル")
+            .bind("テスト説明")
+            .fetch_one(&pool)
+            .await?;
+
+            run(pool.clone(), 10, &server.uri()).await?;
+
+            let status: Option<i32> =
+                sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
+                    .bind(queue_id)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(status, Some(200));
+
+            let stored: Vec<u8> =
+                sqlx::query_scalar("SELECT data FROM rss.article_content WHERE queue_id = $1")
+                    .bind(queue_id)
+                    .fetch_one(&pool)
+                    .await?;
+
+            let mut decompressor = Decompressor::new(Cursor::new(stored), 4096);
+            let mut decompressed = String::new();
+            decompressor.read_to_string(&mut decompressed)?;
+            assert_eq!(decompressed, html_body);
+
+            Ok(())
+        }
+
+        #[sqlx::test]
+        async fn 非200はstatusのみを記録する(pool: PgPool) -> Result<()> {
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            let server = MockServer::start().await;
+
+            Mock::given(method("POST"))
+                .and(path("/fetch"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "html": "",
+                    "status_code": 404,
+                    "title": "Not Found",
+                    "final_url": "https://example.com/missing",
+                    "elapsed_ms": 321.0,
+                    "timestamp": Utc::now().to_rfc3339(),
+                })))
+                .mount(&server)
+                .await;
+
+            let queue_id: Uuid = sqlx::query_scalar(
+                r#"
+                INSERT INTO rss.queue (link, title, description)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                "#,
+            )
+            .bind("https://example.com/missing")
+            .bind("テストタイトル")
+            .bind("テスト説明")
+            .fetch_one(&pool)
+            .await?;
+
+            run(pool.clone(), 10, &server.uri()).await?;
+
+            let status: Option<i32> =
+                sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
+                    .bind(queue_id)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(status, Some(404));
+
+            let exists: Option<Vec<u8>> =
+                sqlx::query_scalar("SELECT data FROM rss.article_content WHERE queue_id = $1")
+                    .bind(queue_id)
+                    .fetch_optional(&pool)
+                    .await?;
+            assert!(exists.is_none());
+
+            Ok(())
+        }
     }
 
-    #[test]
-    fn test_compress_html() {
-        let html = "<html><body>Test content</body></html>";
-        let result = compress_html(html);
+    pub mod compress_html {
+        use std::io::{Cursor, Read};
 
-        assert!(result.is_ok(), "HTML圧縮に失敗");
+        use brotli::Decompressor;
 
-        let compressed = result.unwrap();
-        assert!(!compressed.is_empty());
-        assert!(compressed.len() < html.len(), "圧縮後のサイズが元のサイズより大きい");
-    }
+        use crate::fetch_content::compress_html;
 
-    #[tokio::test]
-    async fn test_search_pending_queue_entries() {
-        // 環境変数が正しく設定されている場合のみテスト
-        if let Ok(db_url) = std::env::var("DATABASE_URL") {
-            if let Ok(pool) = crate::db::create_pool(&db_url).await {
-                let result = search_pending_queue_entries(&pool, 10).await;
-                // DBが初期化されていない場合はエラーになる可能性があるので、結果の存在のみ確認
-                assert!(result.is_ok() || result.is_err());
-            }
+        #[test]
+        fn 圧縮は可逆である() {
+            let html = "<html><body>テスト</body></html>";
+            let compressed = compress_html(html).expect("Brotli圧縮に失敗");
+
+            let mut decompressor = Decompressor::new(Cursor::new(compressed), 4096);
+            let mut decompressed = String::new();
+            decompressor
+                .read_to_string(&mut decompressed)
+                .expect("Brotli展開に失敗");
+
+            assert_eq!(decompressed, html);
         }
     }
 }

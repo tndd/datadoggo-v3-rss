@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
         }
         Commands::FetchContent { limit } => {
             println!("=== fetch-content コマンドを実行 ===\n");
-            fetch_content::run(pool, limit).await?;
+            fetch_content::run(pool, limit, &config.scraping_api_url).await?;
         }
     }
 
