@@ -4,14 +4,37 @@ use uuid::Uuid;
 use crate::models::{Queue, ScrapeRequest, ScrapeResponse};
 
 /// モックスクレイピングAPI（開発用）
+/// URLのハッシュ値に基づいて成功/失敗をシミュレート
 async fn mock_scrape_api(url: &str) -> Result<ScrapeResponse> {
-    // モックレスポンスを返す
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    // URLのハッシュ値を計算して決定的な振る舞いを実現
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // ハッシュ値の下位ビットで成功率80%を実現
+    let status_code = if hash % 10 < 8 {
+        200 // 80%の確率で成功
+    } else if hash % 10 == 8 {
+        404 // 10%の確率で404
+    } else {
+        500 // 10%の確率で500
+    };
+
+    let html = if status_code == 200 {
+        format!("<html><body><h1>Mock content for {}</h1><p>This is a successful response.</p></body></html>", url)
+    } else {
+        format!("<html><body><h1>Error {}</h1></body></html>", status_code)
+    };
+
     Ok(ScrapeResponse {
-        html: format!("<html><body><h1>Mock content for {}</h1></body></html>", url),
-        status_code: 200,
+        html,
+        status_code,
         title: format!("Mock Title for {}", url),
         final_url: url.to_string(),
-        elapsed_ms: 100.0,
+        elapsed_ms: 100.0 + (hash % 500) as f64, // 100-600ms
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
