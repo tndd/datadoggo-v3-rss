@@ -1,0 +1,134 @@
+bbc:
+  top: https://feeds.bbci.co.uk/news/rss.xml
+  world: https://feeds.bbci.co.uk/news/world/rss.xml
+  uk: https://feeds.bbci.co.uk/news/uk/rss.xml
+  business: https://feeds.bbci.co.uk/news/business/rss.xml
+  politics: https://feeds.bbci.co.uk/news/politics/rss.xml
+  health: https://feeds.bbci.co.uk/news/health/rss.xml
+  science: https://feeds.bbci.co.uk/news/science_and_environment/rss.xml
+  technology: https://feeds.bbci.co.uk/news/technology/rss.xml
+
+cbs:
+  top: https://www.cbsnews.com/latest/rss/main
+  us: https://www.cbsnews.com/latest/rss/us
+  politics: https://www.cbsnews.com/latest/rss/politics
+  world: https://www.cbsnews.com/latest/rss/world
+  health: https://www.cbsnews.com/latest/rss/health
+  money: https://www.cbsnews.com/latest/rss/moneywatch
+  science: https://www.cbsnews.com/latest/rss/science
+  technology: https://www.cbsnews.com/latest/rss/technology
+  space: https://www.cbsnews.com/latest/rss/space
+
+guardian:
+  world: https://www.theguardian.com/world/rss
+  us: https://www.theguardian.com/us-news/rss
+  americas: https://www.theguardian.com/world/americas/rss
+  asia: https://www.theguardian.com/world/asia/rss
+  australia: https://www.theguardian.com/australia-news/rss
+  middle_east: https://www.theguardian.com/world/middleeast/rss
+  africa: https://www.theguardian.com/world/africa/rss
+  development: https://www.theguardian.com/global-development/rss
+
+cnbc:
+  top: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114
+  world: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362
+  us: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15837362
+  asia: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19832390
+  europe: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910
+  business: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147
+  earnings: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839135
+  commentary: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100370673
+  economy: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258
+  finance: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664
+  technology: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19854910
+  politics: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000113
+  health: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000108
+  real_estate: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000115
+  wealth: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001054
+  autos: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000101
+  energy: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836768
+  media: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000110
+  retail: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000116
+  travel: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000739
+  small_business: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=44877279
+  make_it: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=103395579
+  invest: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069
+  financial_advise: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100646281
+  personal_finance: https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=21324812
+
+yahoo_japan:
+  topics_top: https://news.yahoo.co.jp/rss/topics/top-picks.xml
+  topics_domestic: https://news.yahoo.co.jp/rss/topics/domestic.xml
+  topics_world: https://news.yahoo.co.jp/rss/topics/world.xml
+  topics_business: https://news.yahoo.co.jp/rss/topics/business.xml
+  topics_it: https://news.yahoo.co.jp/rss/topics/it.xml
+  topics_science: https://news.yahoo.co.jp/rss/topics/science.xml
+  categories_domestic: https://news.yahoo.co.jp/rss/categories/domestic.xml
+  categories_world: https://news.yahoo.co.jp/rss/categories/world.xml
+  categories_business: https://news.yahoo.co.jp/rss/categories/business.xml
+  categories_it: https://news.yahoo.co.jp/rss/categories/it.xml
+  categories_science: https://news.yahoo.co.jp/rss/categories/science.xml
+  cnn: https://news.yahoo.co.jp/rss/media/cnn/all.xml
+  fnn: https://news.yahoo.co.jp/rss/media/fnnprimev/all.xml
+  forbes: https://news.yahoo.co.jp/rss/media/forbes/all.xml
+  tokyo_mx: https://news.yahoo.co.jp/rss/media/tokyomxv/all.xml
+  sankei: https://news.yahoo.co.jp/rss/media/san/all.xml
+  diamond: https://news.yahoo.co.jp/rss/media/diamond/all.xml
+  sangyo: https://news.yahoo.co.jp/rss/media/sangyo/all.xml
+  food_journal: https://news.yahoo.co.jp/rss/media/nissyoku/all.xml
+  newsweek: https://news.yahoo.co.jp/rss/media/newsweek/all.xml
+  president: https://news.yahoo.co.jp/rss/media/president/all.xml
+  ytv: https://news.yahoo.co.jp/rss/media/ytv/all.xml
+  net_keizai: https://news.yahoo.co.jp/rss/media/netkeizai/all.xml
+  maritime_daily: https://news.yahoo.co.jp/rss/media/tjmd/all.xml
+  nikkei_trendy: https://news.yahoo.co.jp/rss/media/nkctrend/all.xml
+  nikkei_biz: https://news.yahoo.co.jp/rss/media/nkbizgate/all.xml
+  national_geographic: https://news.yahoo.co.jp/rss/media/nknatiogeo/all.xml
+  tv_tokyo_biz: https://news.yahoo.co.jp/rss/media/tvtnews/all.xml
+  metal_daily: https://news.yahoo.co.jp/rss/media/tekkou/all.xml
+  shueisha: https://news.yahoo.co.jp/rss/media/shueisha/all.xml
+  sanspo: https://news.yahoo.co.jp/rss/media/sanspo/all.xml
+  gizmodo: https://news.yahoo.co.jp/rss/media/giz/all.xml
+  wedge: https://news.yahoo.co.jp/rss/media/wedge/all.xml
+  harvard_business_review: https://news.yahoo.co.jp/rss/media/dhbrn/all.xml
+  buzzfeed: https://news.yahoo.co.jp/rss/media/bfj/all.xml
+  bbc: https://news.yahoo.co.jp/rss/media/bbc/all.xml
+  asahi: https://news.yahoo.co.jp/rss/media/asahibc/all.xml
+  ap: https://news.yahoo.co.jp/rss/media/aptsushinv/all.xml
+  cnet_japan: https://news.yahoo.co.jp/rss/media/cnetj/all.xml
+  coindesk: https://news.yahoo.co.jp/rss/media/coindesk/all.xml
+  it_media: https://news.yahoo.co.jp/rss/media/zdn_n/all.xml
+  it_media_biz: https://news.yahoo.co.jp/rss/media/zdn_mkt/all.xml
+  php: https://news.yahoo.co.jp/rss/media/php_s/all.xml
+  the_gold_online: https://news.yahoo.co.jp/rss/media/gonline/all.xml
+  wired: https://news.yahoo.co.jp/rss/media/wired/all.xml
+  new_economy: https://news.yahoo.co.jp/rss/media/neweco/all.xml
+  shikiho: https://news.yahoo.co.jp/rss/media/shikihoz/all.xml
+  teikokudb: https://news.yahoo.co.jp/rss/media/teikokudb/all.xml
+  ann: https://news.yahoo.co.jp/rss/media/ann/all.xml
+  toyo_keizai: https://news.yahoo.co.jp/rss/media/toyo/all.xml
+  industrial_daily: https://news.yahoo.co.jp/rss/media/nkogyo/all.xml
+  automobile_daily: https://news.yahoo.co.jp/rss/media/netdenjd/all.xml
+  47news: https://news.yahoo.co.jp/rss/media/yonnana/all.xml
+
+rss_club:
+  bloomberg_top: https://assets.wor.jp/rss/rdf/bloomberg/top.rdf
+  bloomberg_economy: https://assets.wor.jp/rss/rdf/bloomberg/economy.rdf
+  bloomberg_commentary: https://assets.wor.jp/rss/rdf/bloomberg/commentary.rdf
+  nikkei_news: https://assets.wor.jp/rss/rdf/nikkei/news.rdf
+  yomiuri_latest_news: https://assets.wor.jp/rss/rdf/yomiuri/latestnews.rdf
+  minkabu_fx_statement: https://assets.wor.jp/rss/rdf/minkabufx/statement.rdf
+  minkabu_fx_stock: https://assets.wor.jp/rss/rdf/minkabufx/stock.rdf
+  minkabu_fx_commodity: https://assets.wor.jp/rss/rdf/minkabufx/commodity.rdf
+
+grand_fleet:
+  top: https://grandfleet.info/feed/
+  us: https://grandfleet.info/category/us-related/feed
+  europe: https://grandfleet.info/category/european-region/feed
+  russia: https://grandfleet.info/category/russia-related/feed
+  indo_pacific: https://grandfleet.info/category/indo-pacific-related/feed
+  japan: https://grandfleet.info/category/japan-related/feed
+  china: https://grandfleet.info/category/china-related/feed
+
+japan_government:
+  digital_agency_news: https://www.digital.go.jp/rss/news.xml
