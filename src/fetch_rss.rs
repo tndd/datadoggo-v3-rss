@@ -24,7 +24,11 @@ pub fn load_rss_links(path: &str) -> Result<Vec<RssFeedSource>> {
 pub async fn fetch_and_parse_feed(url: &str, group: Option<&str>) -> Result<Vec<NewQueue>> {
     let response = reqwest::get(url).await?;
     let content = response.bytes().await?;
-    let feed = parser::parse(&content[..])?;
+    parse_feed_content(&content, group)
+}
+
+pub(crate) fn parse_feed_content(content: &[u8], group: Option<&str>) -> Result<Vec<NewQueue>> {
+    let feed = parser::parse(content)?;
 
     let mut entries = Vec::new();
 
@@ -224,6 +228,177 @@ mod tests {
         fn 末尾の句読点を除去する() {
             let url = find_first_url("リンク https://example.com/test). 次");
             assert_eq!(url.as_deref(), Some("https://example.com/test"));
+        }
+    }
+
+    pub mod parse_feed_content {
+        use anyhow::Result;
+
+        use crate::fetch_rss::parse_feed_content;
+
+        /// # 検証目的
+        /// RSSドキュメントを解析し、グループや日付のフォールバックが正しく行われることを確認する。
+        #[test]
+        fn rss文字列を解析できる() -> Result<()> {
+            let rss = r#"<?xml version="1.0" encoding="UTF-8"?>
+                <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+                  <channel>
+                    <title>Example Feed</title>
+                    <link>https://feed.example.com</link>
+                    <description>Sample</description>
+                    <item>
+                      <title>Item One</title>
+                      <link>https://example.com/one</link>
+                      <pubDate>Mon, 13 Oct 2025 12:00:00 GMT</pubDate>
+                      <description>本文1</description>
+                    </item>
+                    <item>
+                      <title>Item Two</title>
+                      <description>詳細 https://example.com/two.</description>
+                      <atom:updated>2025-10-13T13:00:00Z</atom:updated>
+                    </item>
+                  </channel>
+                </rss>
+            "#;
+
+            let entries = parse_feed_content(rss.as_bytes(), Some("news"))?;
+
+            assert_eq!(entries.len(), 2);
+
+            let first = &entries[0];
+            assert_eq!(first.link, "https://example.com/one");
+            assert_eq!(first.title, "Item One");
+            assert!(first.pub_date.is_some());
+            assert_eq!(first.description, "本文1");
+            assert_eq!(first.group.as_deref(), Some("news"));
+
+            let second = &entries[1];
+            assert_eq!(second.link, "https://example.com/two");
+            assert_eq!(second.title, "Item Two");
+            assert_eq!(second.description, "詳細 https://example.com/two.");
+
+            Ok(())
+        }
+    }
+
+    pub mod upsert_queue_entries {
+        use anyhow::Result;
+        use chrono::Utc;
+        use sqlx::PgPool;
+
+        use crate::fetch_rss::upsert_queue_entries;
+        use crate::models::NewQueue;
+
+        async fn prepare_pool() -> Option<PgPool> {
+            match std::env::var("TEST_DATABASE_URL") {
+                Ok(url) => match PgPool::connect(&url).await {
+                    Ok(pool) => Some(pool),
+                    Err(e) => {
+                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!("TEST_DATABASE_URLが未設定のためスキップ");
+                    None
+                }
+            }
+        }
+
+        /// # 検証目的
+        /// 初回INSERTでレコードが作成され、feed側のgroup指定が適用されることを確認する。
+        #[tokio::test]
+        async fn 初回挿入で_feed_groupが保存される() -> Result<()> {
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+
+            let entries = vec![
+                NewQueue {
+                    link: "https://example.com/item1".to_string(),
+                    title: "Item1".to_string(),
+                    pub_date: Some(Utc::now()),
+                    description: "本文1".to_string(),
+                    group: None,
+                },
+                NewQueue {
+                    link: "https://example.com/item2".to_string(),
+                    title: "Item2".to_string(),
+                    pub_date: None,
+                    description: "本文2".to_string(),
+                    group: None,
+                },
+            ];
+
+            let inserted = upsert_queue_entries(&pool, entries, Some("world".to_string())).await?;
+            assert_eq!(inserted, 2);
+
+            let records: Vec<(String, Option<String>)> = sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT link, \"group\" FROM rss.queue ORDER BY link"
+            )
+            .fetch_all(&pool)
+            .await?;
+
+            assert_eq!(records.len(), 2);
+            for (_, group) in records {
+                assert_eq!(group.as_deref(), Some("world"));
+            }
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// 既存リンクに対するUPSERTでタイトルとグループが更新されることを確認する。
+        #[tokio::test]
+        async fn 重複リンクを更新できる() -> Result<()> {
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+
+            let initial = vec![NewQueue {
+                link: "https://example.com/item".to_string(),
+                title: "Old Title".to_string(),
+                pub_date: None,
+                description: "Old Desc".to_string(),
+                group: None,
+            }];
+
+            upsert_queue_entries(&pool, initial, Some("initial".to_string())).await?;
+
+            let updated = vec![NewQueue {
+                link: "https://example.com/item".to_string(),
+                title: "New Title".to_string(),
+                pub_date: None,
+                description: "New Desc".to_string(),
+                group: Some("entry".to_string()),
+            }];
+
+            upsert_queue_entries(&pool, updated, None).await?;
+
+            let row: (String, String) = sqlx::query_as::<_, (String, String)>(
+                "SELECT title, description FROM rss.queue WHERE link = $1"
+            )
+            .bind("https://example.com/item")
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(row.0, "New Title");
+            assert_eq!(row.1, "New Desc");
+
+            let group: Option<String> = sqlx::query_scalar(
+                "SELECT \"group\" FROM rss.queue WHERE link = $1"
+            )
+            .bind("https://example.com/item")
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(group.as_deref(), Some("entry"));
+
+            Ok(())
         }
     }
 }
