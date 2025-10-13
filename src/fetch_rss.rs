@@ -8,14 +8,14 @@ use regex::Regex;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::models::{NewQueue, RssFeedSource, RssLinks};
 
 static URL_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"https?://[^\s\"'<>()]+"#).expect("URL正規表現のコンパイルに失敗"));
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FetchRssFeedResult {
     pub group: String,
     pub name: String,
@@ -23,7 +23,7 @@ pub struct FetchRssFeedResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FetchRssSummary {
     pub total_processed: usize,
     pub feeds: Vec<FetchRssFeedResult>,

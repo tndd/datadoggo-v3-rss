@@ -1,7 +1,7 @@
 use crate::models::{Queue, ScrapeRequest, ScrapeResponse};
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -12,14 +12,14 @@ enum ScrapeResult {
     HttpError { status_code: i32 },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FetchContentEntryReport {
     pub queue_id: Uuid,
     pub title: String,
     pub result: FetchContentEntryOutcome,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FetchContentEntryOutcome {
     Saved { status_code: i32 },
@@ -28,7 +28,7 @@ pub enum FetchContentEntryOutcome {
     PersistError { message: String },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FetchContentSummary {
     pub saved_count: usize,
     pub status_only_count: usize,
