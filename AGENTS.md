@@ -1,6 +1,9 @@
 # 変更履歴
 
 ## 2025-10-13
+- fetch-contentでstatus_codeが200以外のレコードも再試行対象にし、処理サマリを返す共通ロジックを整備。
+- axumベースのAPIサーバ（fetch-rss / fetch-content / health）を追加し、HTTPエンドポイントのテストを用意。
+- README・Design・MilestoneにAPIサーバおよび再試行仕様を追記。
 - READMEとDesignにてUUIDがアプリ側生成である旨を明示し、Article取得機能の仕様を追記。
 - Article構造体とsearch_articlesを実装し、結合データ取得のDBテストを追加。
 - `rss_links.yml`の追加パラメータは現行未対応である旨をドキュメントに明記。

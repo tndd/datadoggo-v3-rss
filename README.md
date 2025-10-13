@@ -72,9 +72,21 @@ cargo run -- fetch-content
 cargo run -- fetch-content --limit 50
 ```
 
-- `status_code=NULL`のエントリを取得
+- `status_code=NULL`または`status_code<>200`のエントリを取得
 - スクレイピングAPI（現在はモック）を呼び出し
 - `status_code=200`の場合のみ記事本文をBrotli圧縮してarticle_contentに保存
+- 上記以外のステータスはqueueに記録し直す（再試行可）
+
+### APIサーバを起動
+
+```bash
+cargo run -- serve --host 127.0.0.1 --port 8080
+```
+
+- `GET /health` : ヘルスチェック（`{"status":"ok"}`を返す）
+- `POST /api/fetch-rss` : RSS巡回を実行し、処理結果をJSONで返す
+- `POST /api/fetch-content` : queue内の未取得/失敗レコードを再試行する
+  - リクエストボディ例: `{"limit": 100}`（省略時は100件）
 
 ## テーブル構成
 

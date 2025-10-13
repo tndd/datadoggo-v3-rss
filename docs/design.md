@@ -108,3 +108,11 @@ curl -s -X POST http://localhost:8000/fetch \
 - `wait_for_selector` は指定したCSSセレクタが描画されるまで待機します。不要であれば省略できます。
 - `timeout` はページロードおよび待機の上限秒数です。
 - レスポンスの `html` は取得したDOM全体、`elapsed_ms` は処理時間(ミリ秒)を示します。
+
+# 内部API
+
+CLIに加えてHTTPインターフェースを提供し、外部サービスから処理を呼び出せるようにしている。
+
+- `GET /health` : サーバの稼働確認用エンドポイント。
+- `POST /api/fetch-rss` : RSS巡回を実行し、トータル件数とフィードごとの処理状況をJSONで返す。
+- `POST /api/fetch-content` : queue内の`status_code`がNULLまたは200以外のレコードを対象に再取得し、保存件数/エラー件数などをJSONで返す。リクエストボディで`{"limit":100}`など処理件数を指定できる。
