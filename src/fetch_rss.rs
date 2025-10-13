@@ -6,6 +6,7 @@ use feed_rs::{model::Entry, parser};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use crate::models::{NewQueue, RssFeedSource, RssLinks};
 
@@ -103,11 +104,12 @@ pub async fn upsert_queue_entries(
 
     for entry in entries {
         let group_value = group.clone().or(entry.group.clone());
+        let id = Uuid::new_v4();
 
         sqlx::query(
             r#"
-            INSERT INTO rss.queue (link, title, pub_date, description, "group")
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO rss.queue (id, link, title, pub_date, description, "group")
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (link)
             DO UPDATE SET
                 title = EXCLUDED.title,
@@ -117,6 +119,7 @@ pub async fn upsert_queue_entries(
                 updated_at = NOW()
             "#,
         )
+        .bind(id)
         .bind(&entry.link)
         .bind(&entry.title)
         .bind(entry.pub_date)

@@ -279,17 +279,18 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let queue_id: Uuid = sqlx::query_scalar(
+            let queue_id = Uuid::new_v4();
+            sqlx::query(
                 r#"
-                INSERT INTO rss.queue (link, title, description)
-                VALUES ($1, $2, $3)
-                RETURNING id
+                INSERT INTO rss.queue (id, link, title, description)
+                VALUES ($1, $2, $3, $4)
                 "#,
             )
+            .bind(queue_id)
             .bind("https://example.com")
             .bind("テストタイトル")
             .bind("テスト説明")
-            .fetch_one(&pool)
+            .execute(&pool)
             .await?;
 
             run(pool.clone(), 10, &server.uri()).await?;
@@ -345,17 +346,18 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let queue_id: Uuid = sqlx::query_scalar(
+            let queue_id = Uuid::new_v4();
+            sqlx::query(
                 r#"
-                INSERT INTO rss.queue (link, title, description)
-                VALUES ($1, $2, $3)
-                RETURNING id
+                INSERT INTO rss.queue (id, link, title, description)
+                VALUES ($1, $2, $3, $4)
                 "#,
             )
+            .bind(queue_id)
             .bind("https://example.com/missing")
             .bind("テストタイトル")
             .bind("テスト説明")
-            .fetch_one(&pool)
+            .execute(&pool)
             .await?;
 
             run(pool.clone(), 10, &server.uri()).await?;
@@ -398,17 +400,18 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let queue_id: Uuid = sqlx::query_scalar(
+            let queue_id = Uuid::new_v4();
+            sqlx::query(
                 r#"
-                INSERT INTO rss.queue (link, title, description)
-                VALUES ($1, $2, $3)
-                RETURNING id
+                INSERT INTO rss.queue (id, link, title, description)
+                VALUES ($1, $2, $3, $4)
                 "#,
             )
+            .bind(queue_id)
             .bind("https://example.com/503")
             .bind("テストタイトル503")
             .bind("テスト説明503")
-            .fetch_one(&pool)
+            .execute(&pool)
             .await?;
 
             run(pool.clone(), 10, &server.uri()).await?;

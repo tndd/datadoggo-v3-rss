@@ -1,6 +1,6 @@
 -- queueテーブル作成
 CREATE TABLE IF NOT EXISTS rss.queue (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     link TEXT NOT NULL UNIQUE,
