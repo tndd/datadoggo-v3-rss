@@ -8,10 +8,26 @@ use regex::Regex;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use serde::Serialize;
+
 use crate::models::{NewQueue, RssFeedSource, RssLinks};
 
 static URL_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"https?://[^\s\"'<>()]+"#).expect("URL正規表現のコンパイルに失敗"));
+
+#[derive(Debug, Serialize)]
+pub struct FetchRssFeedResult {
+    pub group: String,
+    pub name: String,
+    pub processed: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FetchRssSummary {
+    pub total_processed: usize,
+    pub feeds: Vec<FetchRssFeedResult>,
+}
 
 /// rss_links.ymlを読み込む
 pub fn load_rss_links(path: &str) -> Result<Vec<RssFeedSource>> {
@@ -141,48 +157,96 @@ pub async fn upsert_queue_entries(
 /// fetch-rssコマンドのメイン処理
 pub async fn run(pool: PgPool) -> Result<()> {
     println!("rss_links.ymlを読み込み中...");
-    let feeds = load_rss_links("rss_links.yml")?;
+    let summary = execute_fetch_rss(&pool, "rss_links.yml").await?;
+
+    if summary.feeds.is_empty() {
+        println!("登録されているRSSフィードがありません");
+        return Ok(());
+    }
+
+    let mut grouped: BTreeMap<&str, Vec<&FetchRssFeedResult>> = BTreeMap::new();
+    for feed in &summary.feeds {
+        grouped.entry(&feed.group).or_default().push(feed);
+    }
+
+    for (group_name, feeds) in grouped {
+        println!("\nグループ: {}", group_name);
+        for feed in feeds {
+            match &feed.error {
+                Some(err) => {
+                    println!("  - {}: ✗ {}", feed.name, err);
+                }
+                None => {
+                    println!("  - {}: ✓ {}件の記事を処理", feed.name, feed.processed);
+                }
+            }
+        }
+    }
+
+    println!("\n合計: {}件の記事を処理しました", summary.total_processed);
+    Ok(())
+}
+
+/// fetch-rssのメインロジックを実行し、結果を返す
+pub async fn execute_fetch_rss(pool: &PgPool, rss_links_path: &str) -> Result<FetchRssSummary> {
+    let feeds = load_rss_links(rss_links_path)?;
+
+    if feeds.is_empty() {
+        return Ok(FetchRssSummary {
+            total_processed: 0,
+            feeds: Vec::new(),
+        });
+    }
 
     let mut grouped: BTreeMap<String, Vec<RssFeedSource>> = BTreeMap::new();
     for feed in feeds {
         grouped.entry(feed.group.clone()).or_default().push(feed);
     }
 
-    if grouped.is_empty() {
-        println!("登録されているRSSフィードがありません");
-        return Ok(());
-    }
-
     let mut total_count = 0;
+    let mut results = Vec::new();
 
     for (group_name, feeds) in grouped {
-        println!("\nグループ: {}", group_name);
-
         for feed in feeds {
-            print!("  - {} を取得中... ", feed.name);
-
             match fetch_and_parse_feed(&feed.url, Some(&feed.group)).await {
                 Ok(entries) => {
                     let count = entries.len();
-                    match upsert_queue_entries(&pool, entries, Some(feed.group.clone())).await {
+                    match upsert_queue_entries(pool, entries, Some(feed.group.clone())).await {
                         Ok(_) => {
-                            println!("✓ {}件の記事を処理", count);
                             total_count += count;
+                            results.push(FetchRssFeedResult {
+                                group: group_name.clone(),
+                                name: feed.name,
+                                processed: count,
+                                error: None,
+                            });
                         }
                         Err(e) => {
-                            println!("✗ DB保存エラー: {}", e);
+                            results.push(FetchRssFeedResult {
+                                group: group_name.clone(),
+                                name: feed.name,
+                                processed: 0,
+                                error: Some(e.to_string()),
+                            });
                         }
                     }
                 }
                 Err(e) => {
-                    println!("✗ 取得エラー: {}", e);
+                    results.push(FetchRssFeedResult {
+                        group: group_name.clone(),
+                        name: feed.name,
+                        processed: 0,
+                        error: Some(e.to_string()),
+                    });
                 }
             }
         }
     }
 
-    println!("\n合計: {}件の記事を処理しました", total_count);
-    Ok(())
+    Ok(FetchRssSummary {
+        total_processed: total_count,
+        feeds: results,
+    })
 }
 
 #[cfg(test)]
@@ -315,8 +379,12 @@ mod tests {
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(&pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(&pool)
+                .await?;
 
             let entries = vec![
                 NewQueue {
@@ -338,11 +406,12 @@ mod tests {
             let inserted = upsert_queue_entries(&pool, entries, Some("world".to_string())).await?;
             assert_eq!(inserted, 2);
 
-            let records: Vec<(String, Option<String>)> = sqlx::query_as::<_, (String, Option<String>)>(
-                "SELECT link, \"group\" FROM rss.queue ORDER BY link"
-            )
-            .fetch_all(&pool)
-            .await?;
+            let records: Vec<(String, Option<String>)> =
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT link, \"group\" FROM rss.queue ORDER BY link",
+                )
+                .fetch_all(&pool)
+                .await?;
 
             assert_eq!(records.len(), 2);
             for (_, group) in records {
@@ -362,8 +431,12 @@ mod tests {
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(&pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(&pool)
+                .await?;
 
             let initial = vec![NewQueue {
                 link: "https://example.com/item".to_string(),
@@ -386,7 +459,7 @@ mod tests {
             upsert_queue_entries(&pool, updated, None).await?;
 
             let row: (String, String) = sqlx::query_as::<_, (String, String)>(
-                "SELECT title, description FROM rss.queue WHERE link = $1"
+                "SELECT title, description FROM rss.queue WHERE link = $1",
             )
             .bind("https://example.com/item")
             .fetch_one(&pool)
@@ -394,12 +467,11 @@ mod tests {
             assert_eq!(row.0, "New Title");
             assert_eq!(row.1, "New Desc");
 
-            let group: Option<String> = sqlx::query_scalar(
-                "SELECT \"group\" FROM rss.queue WHERE link = $1"
-            )
-            .bind("https://example.com/item")
-            .fetch_one(&pool)
-            .await?;
+            let group: Option<String> =
+                sqlx::query_scalar("SELECT \"group\" FROM rss.queue WHERE link = $1")
+                    .bind("https://example.com/item")
+                    .fetch_one(&pool)
+                    .await?;
             assert_eq!(group.as_deref(), Some("entry"));
 
             Ok(())

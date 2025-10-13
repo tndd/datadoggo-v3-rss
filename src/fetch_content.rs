@@ -1,6 +1,7 @@
 use crate::models::{Queue, ScrapeRequest, ScrapeResponse};
 use anyhow::{Context, Result};
 use reqwest::Client;
+use serde::Serialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -11,85 +12,176 @@ enum ScrapeResult {
     HttpError { status_code: i32 },
 }
 
+#[derive(Debug, Serialize)]
+pub struct FetchContentEntryReport {
+    pub queue_id: Uuid,
+    pub title: String,
+    pub result: FetchContentEntryOutcome,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FetchContentEntryOutcome {
+    Saved { status_code: i32 },
+    StatusOnly { status_code: i32 },
+    ApiError { message: String },
+    PersistError { message: String },
+}
+
+#[derive(Debug, Serialize)]
+pub struct FetchContentSummary {
+    pub saved_count: usize,
+    pub status_only_count: usize,
+    pub error_count: usize,
+    pub entries: Vec<FetchContentEntryReport>,
+}
+
+impl FetchContentSummary {
+    fn new() -> Self {
+        Self {
+            saved_count: 0,
+            status_only_count: 0,
+            error_count: 0,
+            entries: Vec::new(),
+        }
+    }
+}
+
 /// fetch-contentコマンドのメイン処理
 pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
-    println!("status_code=NULLのエントリを取得中...");
-    let entries = search_pending_queue_entries(&pool, limit).await?;
+    println!("status_code=NULLまたは非200のエントリを取得中...");
+    let summary = execute_fetch_content(&pool, limit, api_url).await?;
 
-    if entries.is_empty() {
+    if summary.entries.is_empty() {
         println!("処理対象のエントリがありません");
         return Ok(());
     }
 
-    println!("{}件のエントリを処理します\n", entries.len());
+    println!("{}件のエントリを処理します\n", summary.entries.len());
 
-    let client = Client::new();
-    let mut saved_count = 0;
-    let mut status_only_count = 0;
-    let mut error_count = 0;
-
-    for entry in entries {
-        print!("  - {} ... ", entry.title);
-
-        let request = ScrapeRequest {
-            url: entry.link.clone(),
-            wait_for_selector: None,
-            timeout: Some(DEFAULT_TIMEOUT_SECS),
-        };
-
-        match call_scrape_api(&client, api_url, &request).await {
-            Ok(ScrapeResult::Success(response)) => {
-                if response.status_code == 200 {
-                    match persist_success(&pool, entry.id, &response.html, response.status_code)
-                        .await
-                    {
-                        Ok(_) => {
-                            println!("✓ 保存完了 (status: {})", response.status_code);
-                            saved_count += 1;
-                        }
-                        Err(e) => {
-                            println!("✗ 保存エラー: {}", e);
-                            error_count += 1;
-                        }
-                    }
-                } else {
-                    match persist_status_only(&pool, entry.id, response.status_code).await {
-                        Ok(_) => {
-                            println!("✓ status_codeのみ記録 (status: {})", response.status_code);
-                            status_only_count += 1;
-                        }
-                        Err(e) => {
-                            println!("✗ status_code更新エラー: {}", e);
-                            error_count += 1;
-                        }
-                    }
-                }
+    for entry in &summary.entries {
+        match &entry.result {
+            FetchContentEntryOutcome::Saved { status_code } => {
+                println!(
+                    "  - {} ... ✓ 保存完了 (status: {})",
+                    entry.title, status_code
+                );
             }
-            Ok(ScrapeResult::HttpError { status_code }) => {
-                match persist_status_only(&pool, entry.id, status_code).await {
-                    Ok(_) => {
-                        println!("✓ HTTP{}を記録 (statusのみ)", status_code);
-                        status_only_count += 1;
-                    }
-                    Err(e) => {
-                        println!("✗ status_code更新エラー: {}", e);
-                        error_count += 1;
-                    }
-                }
+            FetchContentEntryOutcome::StatusOnly { status_code } => {
+                println!(
+                    "  - {} ... ✓ status_codeのみ記録 (status: {})",
+                    entry.title, status_code
+                );
             }
-            Err(e) => {
-                println!("✗ APIエラー: {}", e);
-                error_count += 1;
+            FetchContentEntryOutcome::ApiError { message } => {
+                println!("  - {} ... ✗ APIエラー: {}", entry.title, message);
+            }
+            FetchContentEntryOutcome::PersistError { message } => {
+                println!("  - {} ... ✗ 保存エラー: {}", entry.title, message);
             }
         }
     }
 
     println!(
         "\n完了: 本文保存 {}件, statusのみ {}件, エラー {}件",
-        saved_count, status_only_count, error_count
+        summary.saved_count, summary.status_only_count, summary.error_count
     );
 
     Ok(())
+}
+
+/// fetch-contentのメインロジックを実行し、結果を返す
+pub async fn execute_fetch_content(
+    pool: &PgPool,
+    limit: i64,
+    api_url: &str,
+) -> Result<FetchContentSummary> {
+    let entries = search_queue_entries_for_fetch(pool, limit).await?;
+
+    if entries.is_empty() {
+        return Ok(FetchContentSummary::new());
+    }
+
+    let client = Client::new();
+    let mut summary = FetchContentSummary::new();
+
+    for entry in entries {
+        let request = ScrapeRequest {
+            url: entry.link.clone(),
+            wait_for_selector: None,
+            timeout: Some(DEFAULT_TIMEOUT_SECS),
+        };
+
+        let mut report = FetchContentEntryReport {
+            queue_id: entry.id,
+            title: entry.title.clone(),
+            result: FetchContentEntryOutcome::ApiError {
+                message: "未処理".to_string(),
+            },
+        };
+
+        match call_scrape_api(&client, api_url, &request).await {
+            Ok(ScrapeResult::Success(response)) => {
+                if response.status_code == 200 {
+                    match persist_success(pool, entry.id, &response.html, response.status_code)
+                        .await
+                    {
+                        Ok(_) => {
+                            summary.saved_count += 1;
+                            report.result = FetchContentEntryOutcome::Saved {
+                                status_code: response.status_code,
+                            };
+                        }
+                        Err(e) => {
+                            summary.error_count += 1;
+                            report.result = FetchContentEntryOutcome::PersistError {
+                                message: e.to_string(),
+                            };
+                        }
+                    }
+                } else {
+                    match persist_status_only(pool, entry.id, response.status_code).await {
+                        Ok(_) => {
+                            summary.status_only_count += 1;
+                            report.result = FetchContentEntryOutcome::StatusOnly {
+                                status_code: response.status_code,
+                            };
+                        }
+                        Err(e) => {
+                            summary.error_count += 1;
+                            report.result = FetchContentEntryOutcome::PersistError {
+                                message: e.to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+            Ok(ScrapeResult::HttpError { status_code }) => {
+                match persist_status_only(pool, entry.id, status_code).await {
+                    Ok(_) => {
+                        summary.status_only_count += 1;
+                        report.result = FetchContentEntryOutcome::StatusOnly { status_code };
+                    }
+                    Err(e) => {
+                        summary.error_count += 1;
+                        report.result = FetchContentEntryOutcome::PersistError {
+                            message: e.to_string(),
+                        };
+                    }
+                }
+            }
+            Err(e) => {
+                summary.error_count += 1;
+                report.result = FetchContentEntryOutcome::ApiError {
+                    message: e.to_string(),
+                };
+            }
+        }
+
+        summary.entries.push(report);
+    }
+
+    Ok(summary)
 }
 
 /// スクレイピングAPIを呼び出す
@@ -132,14 +224,16 @@ pub(crate) fn compress_html(html: &str) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
-/// status_code=NULLのqueueエントリを取得
-async fn search_pending_queue_entries(pool: &PgPool, limit: i64) -> Result<Vec<Queue>> {
+/// 再処理対象のqueueエントリを取得（status_codeがNULLまたは200以外）
+async fn search_queue_entries_for_fetch(pool: &PgPool, limit: i64) -> Result<Vec<Queue>> {
     let entries = sqlx::query_as::<_, Queue>(
         r#"
         SELECT id, created_at, updated_at, link, title, pub_date, description, status_code, "group"
         FROM rss.queue
-        WHERE status_code IS NULL
-        ORDER BY created_at ASC
+        WHERE status_code IS NULL OR status_code <> 200
+        ORDER BY
+            CASE WHEN status_code IS NULL THEN 0 ELSE 1 END,
+            updated_at ASC
         LIMIT $1
         "#,
     )
@@ -222,7 +316,7 @@ async fn persist_status_only(pool: &PgPool, queue_id: Uuid, status_code: i32) ->
 
 #[cfg(test)]
 mod tests {
-    pub mod run {
+    pub mod execute_fetch_content_tests {
         use std::io::{Cursor, Read};
 
         use anyhow::Result;
@@ -234,7 +328,7 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        use crate::fetch_content::run;
+        use crate::fetch_content::{execute_fetch_content, FetchContentEntryOutcome};
         use crate::models::ArticleContent;
 
         async fn prepare_pool() -> Option<PgPool> {
@@ -305,7 +399,15 @@ mod tests {
             .execute(&pool)
             .await?;
 
-            run(pool.clone(), 10, &server.uri()).await?;
+            let summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
+            assert_eq!(summary.saved_count, 1);
+            assert_eq!(summary.status_only_count, 0);
+            assert_eq!(summary.error_count, 0);
+            assert_eq!(summary.entries.len(), 1);
+            assert!(matches!(
+                summary.entries[0].result,
+                FetchContentEntryOutcome::Saved { status_code: 200 }
+            ));
 
             let status: Option<i32> =
                 sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
@@ -374,7 +476,15 @@ mod tests {
             .execute(&pool)
             .await?;
 
-            run(pool.clone(), 10, &server.uri()).await?;
+            let summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
+            assert_eq!(summary.saved_count, 0);
+            assert_eq!(summary.status_only_count, 1);
+            assert_eq!(summary.error_count, 0);
+            assert_eq!(summary.entries.len(), 1);
+            assert!(matches!(
+                summary.entries[0].result,
+                FetchContentEntryOutcome::StatusOnly { status_code: 404 }
+            ));
 
             let status: Option<i32> =
                 sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
@@ -428,7 +538,15 @@ mod tests {
             .execute(&pool)
             .await?;
 
-            run(pool.clone(), 10, &server.uri()).await?;
+            let summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
+            assert_eq!(summary.saved_count, 0);
+            assert_eq!(summary.status_only_count, 1);
+            assert_eq!(summary.error_count, 0);
+            assert_eq!(summary.entries.len(), 1);
+            assert!(matches!(
+                summary.entries[0].result,
+                FetchContentEntryOutcome::StatusOnly { status_code: 503 }
+            ));
 
             let status: Option<i32> =
                 sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
@@ -444,6 +562,81 @@ mod tests {
             .fetch_optional(&pool)
             .await?;
             assert!(exists.is_none());
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// 一度失敗したレコードが再試行対象となり、成功時には本文保存とstatus更新が行われることを確認する。
+        #[tokio::test]
+        async fn 失敗済みレコードを再試行する() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let server = MockServer::start().await;
+            let html_body = "<html><body>retry ok</body></html>";
+
+            Mock::given(method("POST"))
+                .and(path("/fetch"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "html": html_body,
+                    "status_code": 200,
+                    "title": "Retry Title",
+                    "final_url": "https://example.com/retry",
+                    "elapsed_ms": 45.0,
+                    "timestamp": Utc::now().to_rfc3339(),
+                })))
+                .mount(&server)
+                .await;
+
+            let queue_id = Uuid::new_v4();
+            sqlx::query(
+                r#"
+                INSERT INTO rss.queue (id, link, title, description, status_code)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+            )
+            .bind(queue_id)
+            .bind("https://example.com/retry")
+            .bind("リトライ対象")
+            .bind("本文リトライ")
+            .bind(503)
+            .execute(&pool)
+            .await?;
+
+            let summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
+            assert_eq!(summary.saved_count, 1);
+            assert_eq!(summary.status_only_count, 0);
+            assert_eq!(summary.error_count, 0);
+            assert_eq!(summary.entries.len(), 1);
+            assert!(matches!(
+                summary.entries[0].result,
+                FetchContentEntryOutcome::Saved { status_code: 200 }
+            ));
+
+            let status: Option<i32> =
+                sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
+                    .bind(queue_id)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(status, Some(200));
+
+            let stored: ArticleContent = sqlx::query_as(
+                "SELECT queue_id, created_at, updated_at, data FROM rss.article_content WHERE queue_id = $1",
+            )
+            .bind(queue_id)
+            .fetch_one(&pool)
+            .await?;
+
+            let mut decompressor = Decompressor::new(Cursor::new(stored.data), 4096);
+            let mut decompressed = String::new();
+            decompressor.read_to_string(&mut decompressed)?;
+            assert_eq!(decompressed, html_body);
 
             Ok(())
         }
