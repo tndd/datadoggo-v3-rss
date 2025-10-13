@@ -15,8 +15,8 @@ impl Config {
         let database_url = env::var("DATABASE_URL")
             .map_err(|_| anyhow::anyhow!("DATABASE_URLが設定されていません"))?;
 
-        let scraping_api_url = env::var("SCRAPING_API_URL")
-            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+        let scraping_api_url =
+            env::var("SCRAPING_API_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
 
         Ok(Config {
             database_url,

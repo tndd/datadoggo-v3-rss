@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
 /// データベース接続プールを作成
 pub async fn create_pool(database_url: &str) -> Result<PgPool> {
@@ -16,11 +16,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_create_pool() {
-        // 環境変数が正しく設定されている場合のみテストを実行
-        if let Ok(db_url) = std::env::var("DATABASE_URL") {
-            let result = create_pool(&db_url).await;
-            assert!(result.is_ok(), "データベース接続プールの作成に失敗");
-        }
+    async fn test_create_pool_with_test_database() {
+        // TEST_DATABASE_URLが未設定の場合はスキップ
+        let db_url = match std::env::var("TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!("TEST_DATABASE_URLが未設定のためスキップ");
+                return;
+            }
+        };
+
+        let result = create_pool(&db_url).await;
+        assert!(result.is_ok(), "テスト用データベースへの接続に失敗");
     }
 }

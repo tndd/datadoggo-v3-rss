@@ -1,8 +1,9 @@
-# datadoggo-v2-rss
+# datadoggo-v3-rss
 rssフィードを元に情報を集め、dbへの保存を行う。
 
 dbはpsqlを使用する。
-- databaseは`datadoggo-v3`
+- production databaseは`datadoggo_v3`
+- test databaseは`test_datadoggo_v3`
 - schema名は`rss`
 
 # テーブル定義
@@ -19,10 +20,10 @@ linkフィールドについては、blueskyのような例外があるので注
 | updated_at  | timestampz  | 最終更新日時                       |
 | link        | text        | rssフィールドのlink                |
 | title       | text        | rssフィールドのtitle               |
-| pub_data    | timestampz? | rssフィールドのpub_data            |
+| pub_date    | timestampz? | rssフィールドのpub_date（未提供時はNULL） |
 | description | text        | rssのdescriptionフィールド         |
-| status_code | int?        | HTTPステータスコード               |
-| group       | text?       | グループ名。何らかの分類が必要なら |
+| status_code | int?        | HTTPステータスコード（未取得時はNULL） |
+| group       | text?       | グループ名。分類不要ならNULL       |
 
 ## article_content
 rssから取得してきた記事データ。
@@ -33,7 +34,7 @@ status_codeが200の場合しかここにデータは保存されない。
 | queue_id   | uuid       | queueのid   |
 | created_at | timestampz | ---         |
 | updated_at | timestampz | ---         |
-| data       | bytes      | Brotli形式  |
+| data       | bytes      | Brotli形式（PostgreSQLではBYTEA） |
 
 # yaml
 
@@ -47,6 +48,8 @@ status_codeが200の場合しかここにデータは保存されない。
 | group | text     | グループ名  |
 | name  | text     | リンク名    |
 
+> **注記**: 設計上は`wait_for_selector`や`timeout`など追加パラメータを受け取れるが、現行バージョンでは未対応のため`rss_links.yml`に指定しても処理では利用されない。
+
 # ドメインモデル
 
 ## Article
@@ -59,9 +62,9 @@ queueにarticle_contentをjoinしたもの。
 | updated_at  | timestampz  | queueの最終更新日時        |
 | link        | text        | rssフィールドのlink        |
 | title       | text        | rssフィールドのtitle       |
-| pub_data    | timestampz? | rssフィールドのpub_data    |
+| pub_date    | timestampz? | rssフィールドのpub_date    |
 | description | text        | rssのdescriptionフィールド |
-| data        | tezt        | 記事の内容                 |
+| data        | bytes       | Brotli圧縮済み記事のバイナリ |
 | group       | text?       | グループ名                 |
 
 # api

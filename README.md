@@ -22,13 +22,15 @@ cargo build
 PostgreSQLで以下を実行：
 
 ```sql
-CREATE DATABASE "datadoggo-v3";
+DROP DATABASE IF EXISTS "datadoggo-v3";
+DROP DATABASE IF EXISTS datadoggo_v3;
+CREATE DATABASE datadoggo_v3;
 ```
 
 `.env`ファイルを編集してDB接続情報を設定：
 
 ```env
-DATABASE_URL="postgresql://user:password@localhost:5432/datadoggo-v3"
+DATABASE_URL="postgresql://user:password@localhost:5432/datadoggo_v3"
 SCRAPING_API_URL="http://localhost:8000"
 ```
 
@@ -36,13 +38,13 @@ SCRAPING_API_URL="http://localhost:8000"
 
 ```bash
 # schema作成
-psql -d datadoggo-v3 -f migrations/20251013_001_create_schema.sql
+psql -d datadoggo_v3 -f migrations/202510130001_create_schema.sql
 
 # queueテーブル作成
-psql -d datadoggo-v3 -f migrations/20251013_002_create_queue_table.sql
+psql -d datadoggo_v3 -f migrations/202510130002_create_queue_table.sql
 
 # article_contentテーブル作成
-psql -d datadoggo-v3 -f migrations/20251013_003_create_article_content_table.sql
+psql -d datadoggo_v3 -f migrations/202510130003_create_article_content_table.sql
 ```
 
 ### 4. RSSフィード設定
@@ -85,10 +87,10 @@ cargo run -- fetch-content --limit 50
 | updated_at   | TIMESTAMPTZ | 更新日時（自動更新）   |
 | link         | TEXT        | 記事URL（UNIQUE制約）  |
 | title        | TEXT        | 記事タイトル           |
-| pub_date     | TIMESTAMPTZ | 公開日時               |
+| pub_date     | TIMESTAMPTZ | 公開日時（NULL許容）   |
 | description  | TEXT        | 記事説明               |
-| status_code  | INTEGER     | HTTPステータスコード   |
-| group        | TEXT        | グループ名             |
+| status_code  | INTEGER     | HTTPステータスコード（NULL許容、未取得時はNULL） |
+| group        | TEXT        | グループ名（NULL許容） |
 
 ### rss.article_content
 
@@ -106,6 +108,18 @@ cargo run -- fetch-content --limit 50
 ```bash
 cargo test
 ```
+
+データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。PostgreSQLのテスト用データベースを作成し、以下のように環境変数を設定してください。
+
+```bash
+export TEST_DATABASE_URL="postgresql://user:password@localhost:5432/test_datadoggo_v3"
+
+# テスト用データベースの初期化例
+psql -d postgres -c "DROP DATABASE IF EXISTS test_datadoggo_v3"
+psql -d postgres -c "CREATE DATABASE test_datadoggo_v3"
+```
+
+テストデータベースは毎回初期化される想定のため、本番データベースと共有しないよう注意してください。環境変数が未設定の場合、DB接続を必要とするテストは自動的にスキップされます。
 
 ### コンパイルチェック
 

@@ -40,7 +40,51 @@ pub struct NewQueue {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RssLinks {
     #[serde(flatten)]
-    pub groups: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    groups: std::collections::HashMap<String, std::collections::HashMap<String, RssLinkEntry>>,
+}
+
+impl RssLinks {
+    /// フラット化したフィード一覧を取得
+    pub fn into_sources(self) -> Vec<RssFeedSource> {
+        let mut feeds = Vec::new();
+
+        for (group, entries) in self.groups {
+            for (name, entry) in entries {
+                let url = match entry {
+                    RssLinkEntry::Url(url) => url,
+                    RssLinkEntry::Detailed { url, .. } => url,
+                };
+
+                feeds.push(RssFeedSource {
+                    group: group.clone(),
+                    name,
+                    url,
+                });
+            }
+        }
+
+        feeds
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RssFeedSource {
+    pub group: String,
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RssLinkEntry {
+    Url(String),
+    Detailed {
+        url: String,
+        #[serde(default)]
+        _wait_for_selector: Option<String>,
+        #[serde(default)]
+        _timeout: Option<u64>,
+    },
 }
 
 /// スクレイピングAPIリクエスト
@@ -58,8 +102,4 @@ pub struct ScrapeRequest {
 pub struct ScrapeResponse {
     pub html: String,
     pub status_code: i32,
-    pub title: String,
-    pub final_url: String,
-    pub elapsed_ms: f64,
-    pub timestamp: String,
 }

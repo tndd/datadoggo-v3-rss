@@ -4,6 +4,9 @@ mod fetch_content;
 mod fetch_rss;
 mod models;
 
+#[cfg(test)]
+mod test_support;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -45,7 +48,7 @@ async fn main() -> Result<()> {
         }
         Commands::FetchContent { limit } => {
             println!("=== fetch-content コマンドを実行 ===\n");
-            fetch_content::run(pool, limit).await?;
+            fetch_content::run(pool, limit, &config.scraping_api_url).await?;
         }
     }
 
