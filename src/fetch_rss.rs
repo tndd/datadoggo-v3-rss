@@ -309,11 +309,13 @@ mod tests {
         /// 初回INSERTでレコードが作成され、feed側のgroup指定が適用されることを確認する。
         #[tokio::test]
         async fn 初回挿入で_feed_groupが保存される() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
             let Some(pool) = prepare_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
             sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
 
             let entries = vec![
@@ -354,11 +356,13 @@ mod tests {
         /// 既存リンクに対するUPSERTでタイトルとグループが更新されることを確認する。
         #[tokio::test]
         async fn 重複リンクを更新できる() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
             let Some(pool) = prepare_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
             sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
 
             let initial = vec![NewQueue {

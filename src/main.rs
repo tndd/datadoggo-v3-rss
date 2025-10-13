@@ -4,6 +4,9 @@ mod fetch_content;
 mod fetch_rss;
 mod models;
 
+#[cfg(test)]
+mod test_support;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 

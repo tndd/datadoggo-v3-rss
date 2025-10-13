@@ -267,6 +267,7 @@ mod tests {
         /// ステータス200時に本文を圧縮保存し、status_codeを200へ更新できることを確認する。
         #[tokio::test]
         async fn 保存成功で記事が圧縮保存される() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
             let Some(pool) = prepare_pool().await else {
                 return Ok(());
             };
@@ -336,6 +337,7 @@ mod tests {
         /// ステータス200以外では本文を保存せず、status_codeのみを更新することを確認する。
         #[tokio::test]
         async fn 非200はstatusのみを記録する() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
             let Some(pool) = prepare_pool().await else {
                 return Ok(());
             };
@@ -396,6 +398,7 @@ mod tests {
         /// スクレイピングAPIがHTTPエラーを返した場合でもstatus_codeを保存することを確認する。
         #[tokio::test]
         async fn httpエラーでもstatusを記録する() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
             let Some(pool) = prepare_pool().await else {
                 return Ok(());
             };
