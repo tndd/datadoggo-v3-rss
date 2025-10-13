@@ -1,5 +1,9 @@
 # 変更履歴
 
+## 2025-10-13
+- スクレイピングAPIがHTTPエラーを返した場合でも`status_code`を保存するよう`fetch-content`の処理を改修。
+- HTTP 5xx応答をモック化し、`status_code`保持を検証するテストを追加。
+
 ## 2025-10-12
 - `fetch-content` フローを外部スクレイピングAPI連携仕様に合わせて再実装。
 - API呼び出し結果の保存処理をトランザクション化し、Brotli圧縮データとstatus_codeの整合性を保証。

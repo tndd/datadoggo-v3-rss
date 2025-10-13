@@ -1,10 +1,15 @@
 use crate::models::{Queue, ScrapeRequest, ScrapeResponse};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use reqwest::Client;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
+
+enum ScrapeResult {
+    Success(ScrapeResponse),
+    HttpError { status_code: i32 },
+}
 
 /// fetch-contentコマンドのメイン処理
 pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
@@ -33,7 +38,7 @@ pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
         };
 
         match call_scrape_api(&client, api_url, &request).await {
-            Ok(response) => {
+            Ok(ScrapeResult::Success(response)) => {
                 if response.status_code == 200 {
                     match persist_success(&pool, entry.id, &response.html, response.status_code)
                         .await
@@ -60,6 +65,18 @@ pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
                     }
                 }
             }
+            Ok(ScrapeResult::HttpError { status_code }) => {
+                match persist_status_only(&pool, entry.id, status_code).await {
+                    Ok(_) => {
+                        println!("✓ HTTP{}を記録 (statusのみ)", status_code);
+                        status_only_count += 1;
+                    }
+                    Err(e) => {
+                        println!("✗ status_code更新エラー: {}", e);
+                        error_count += 1;
+                    }
+                }
+            }
             Err(e) => {
                 println!("✗ APIエラー: {}", e);
                 error_count += 1;
@@ -80,25 +97,22 @@ async fn call_scrape_api(
     client: &Client,
     api_url: &str,
     request: &ScrapeRequest,
-) -> Result<ScrapeResponse> {
+) -> Result<ScrapeResult> {
     let endpoint = format!("{}/fetch", api_url.trim_end_matches('/'));
     let response = client.post(endpoint).json(request).send().await?;
 
     let status = response.status();
     let bytes = response.bytes().await?;
 
-    if !status.is_success() {
-        let body_preview = String::from_utf8_lossy(&bytes);
-        return Err(anyhow!(
-            "スクレイピングAPIがHTTP{}を返却: {}",
-            status.as_u16(),
-            body_preview
-        ));
+    if status.is_success() {
+        let scrape_response: ScrapeResponse = serde_json::from_slice(&bytes)
+            .context("スクレイピングAPIレスポンスのJSONデコードに失敗")?;
+        Ok(ScrapeResult::Success(scrape_response))
+    } else {
+        Ok(ScrapeResult::HttpError {
+            status_code: status.as_u16() as i32,
+        })
     }
-
-    let scrape_response: ScrapeResponse = serde_json::from_slice(&bytes)
-        .context("スクレイピングAPIレスポンスのJSONデコードに失敗")?;
-    Ok(scrape_response)
 }
 
 /// HTMLをBrotli圧縮
@@ -352,6 +366,59 @@ mod tests {
                     .fetch_one(&pool)
                     .await?;
             assert_eq!(status, Some(404));
+
+            let exists: Option<ArticleContent> = sqlx::query_as(
+                "SELECT queue_id, created_at, updated_at, data FROM rss.article_content WHERE queue_id = $1",
+            )
+            .bind(queue_id)
+            .fetch_optional(&pool)
+            .await?;
+            assert!(exists.is_none());
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// スクレイピングAPIがHTTPエラーを返した場合でもstatus_codeを保存することを確認する。
+        #[tokio::test]
+        async fn httpエラーでもstatusを記録する() -> Result<()> {
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+
+            let server = MockServer::start().await;
+
+            Mock::given(method("POST"))
+                .and(path("/fetch"))
+                .respond_with(
+                    ResponseTemplate::new(503).set_body_string("upstream error"),
+                )
+                .mount(&server)
+                .await;
+
+            let queue_id: Uuid = sqlx::query_scalar(
+                r#"
+                INSERT INTO rss.queue (link, title, description)
+                VALUES ($1, $2, $3)
+                RETURNING id
+                "#,
+            )
+            .bind("https://example.com/503")
+            .bind("テストタイトル503")
+            .bind("テスト説明503")
+            .fetch_one(&pool)
+            .await?;
+
+            run(pool.clone(), 10, &server.uri()).await?;
+
+            let status: Option<i32> =
+                sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
+                    .bind(queue_id)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(status, Some(503));
 
             let exists: Option<ArticleContent> = sqlx::query_as(
                 "SELECT queue_id, created_at, updated_at, data FROM rss.article_content WHERE queue_id = $1",
