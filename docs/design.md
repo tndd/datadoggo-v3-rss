@@ -116,3 +116,4 @@ CLIに加えてHTTPインターフェースを提供し、外部サービスか�
 - `GET /health` : サーバの稼働確認用エンドポイント。
 - `POST /api/fetch-rss` : RSS巡回を実行し、トータル件数とフィードごとの処理状況をJSONで返す。
 - `POST /api/fetch-content` : queue内の`status_code`がNULLまたは200以外のレコードを対象に再取得し、保存件数/エラー件数などをJSONで返す。リクエストボディで`{"limit":100}`など処理件数を指定できる。
+- 環境変数`WEBHOOK_URL`が設定されている場合、上記処理は`event`（`fetch_rss`/`fetch_content`）と`source`（`cli`/`api`）を含むサマリをWebhookへPOSTする。

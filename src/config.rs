@@ -5,6 +5,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub scraping_api_url: String,
+    pub webhook_url: Option<String>,
 }
 
 impl Config {
@@ -18,9 +19,12 @@ impl Config {
         let scraping_api_url =
             env::var("SCRAPING_API_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
 
+        let webhook_url = env::var("WEBHOOK_URL").ok();
+
         Ok(Config {
             database_url,
             scraping_api_url,
+            webhook_url,
         })
     }
 }

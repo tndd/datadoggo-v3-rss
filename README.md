@@ -32,6 +32,8 @@ CREATE DATABASE datadoggo_v3;
 ```env
 DATABASE_URL="postgresql://user:password@localhost:5432/datadoggo_v3"
 SCRAPING_API_URL="http://localhost:8000"
+# 送信先Webhookがある場合は設定（任意）
+# WEBHOOK_URL="https://example.com/webhook"
 ```
 
 ### 3. マイグレーション実行
@@ -76,6 +78,7 @@ cargo run -- fetch-content --limit 50
 - スクレイピングAPI（現在はモック）を呼び出し
 - `status_code=200`の場合のみ記事本文をBrotli圧縮してarticle_contentに保存
 - 上記以外のステータスはqueueに記録し直す（再試行可）
+- 処理サマリは設定済みのWebhook URLへPOSTされる
 
 ### APIサーバを起動
 
@@ -87,6 +90,7 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 - `POST /api/fetch-rss` : RSS巡回を実行し、処理結果をJSONで返す
 - `POST /api/fetch-content` : queue内の未取得/失敗レコードを再試行する
   - リクエストボディ例: `{"limit": 100}`（省略時は100件）
+- 環境変数`WEBHOOK_URL`を設定している場合、各エンドポイント実行後にサマリをWebhookへ送信
 
 ## テーブル構成
 

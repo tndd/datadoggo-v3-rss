@@ -11,6 +11,7 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 use crate::models::{NewQueue, RssFeedSource, RssLinks};
+use crate::webhook;
 
 static URL_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"https?://[^\s\"'<>()]+"#).expect("URL正規表現のコンパイルに失敗"));
@@ -155,7 +156,7 @@ pub async fn upsert_queue_entries(
 }
 
 /// fetch-rssコマンドのメイン処理
-pub async fn run(pool: PgPool) -> Result<()> {
+pub async fn run(pool: PgPool, webhook_url: Option<&str>) -> Result<()> {
     println!("rss_links.ymlを読み込み中...");
     let summary = execute_fetch_rss(&pool, "rss_links.yml").await?;
 
@@ -184,6 +185,11 @@ pub async fn run(pool: PgPool) -> Result<()> {
     }
 
     println!("\n合計: {}件の記事を処理しました", summary.total_processed);
+
+    if let Err(e) = webhook::notify_fetch_rss(webhook_url, &summary, "cli").await {
+        eprintln!("Webhook送信に失敗しました(fetch-rss): {}", e);
+    }
+
     Ok(())
 }
 

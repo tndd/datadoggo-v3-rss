@@ -5,6 +5,7 @@ mod db;
 mod fetch_content;
 mod fetch_rss;
 mod models;
+mod webhook;
 
 #[cfg(test)]
 mod test_support;
@@ -58,11 +59,17 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::FetchRss => {
             println!("=== fetch-rss コマンドを実行 ===\n");
-            fetch_rss::run(pool).await?;
+            fetch_rss::run(pool, config.webhook_url.as_deref()).await?;
         }
         Commands::FetchContent { limit } => {
             println!("=== fetch-content コマンドを実行 ===\n");
-            fetch_content::run(pool, limit, &config.scraping_api_url).await?;
+            fetch_content::run(
+                pool,
+                limit,
+                &config.scraping_api_url,
+                config.webhook_url.as_deref(),
+            )
+            .await?;
         }
         Commands::Serve { host, port } => {
             println!("=== APIサーバを起動 ===\n");
@@ -70,6 +77,7 @@ async fn main() -> Result<()> {
                 pool.clone(),
                 config.scraping_api_url.clone(),
                 "rss_links.yml".to_string(),
+                config.webhook_url.clone(),
             );
             api::serve(state, host, port).await?;
         }

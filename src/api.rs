@@ -12,6 +12,7 @@ use sqlx::PgPool;
 
 use crate::fetch_content::{execute_fetch_content, FetchContentSummary};
 use crate::fetch_rss::{execute_fetch_rss, FetchRssSummary};
+use crate::webhook;
 
 /// APIサーバで共有する状態
 #[derive(Clone)]
@@ -19,14 +20,21 @@ pub struct ApiState {
     pub pool: PgPool,
     pub scraping_api_url: String,
     pub rss_links_path: String,
+    pub webhook_url: Option<String>,
 }
 
 impl ApiState {
-    pub fn new(pool: PgPool, scraping_api_url: String, rss_links_path: String) -> Self {
+    pub fn new(
+        pool: PgPool,
+        scraping_api_url: String,
+        rss_links_path: String,
+        webhook_url: Option<String>,
+    ) -> Self {
         Self {
             pool,
             scraping_api_url,
             rss_links_path,
+            webhook_url,
         }
     }
 }
@@ -84,10 +92,15 @@ fn bad_request<E: std::fmt::Display>(err: E) -> (StatusCode, Json<ErrorResponse>
 }
 
 async fn fetch_rss_handler(State(state): State<ApiState>) -> ApiResult<Json<FetchRssSummary>> {
-    execute_fetch_rss(&state.pool, &state.rss_links_path)
+    let summary = execute_fetch_rss(&state.pool, &state.rss_links_path)
         .await
-        .map(Json)
-        .map_err(internal_error)
+        .map_err(internal_error)?;
+
+    if let Err(e) = webhook::notify_fetch_rss(state.webhook_url.as_deref(), &summary, "api").await {
+        eprintln!("Webhook送信に失敗しました(fetch-rss): {}", e);
+    }
+
+    Ok(Json(summary))
 }
 
 async fn fetch_content_handler(
@@ -99,10 +112,17 @@ async fn fetch_content_handler(
         return Err(bad_request("limitは1以上で指定してください"));
     }
 
-    execute_fetch_content(&state.pool, limit, &state.scraping_api_url)
+    let summary = execute_fetch_content(&state.pool, limit, &state.scraping_api_url)
         .await
-        .map(Json)
-        .map_err(internal_error)
+        .map_err(internal_error)?;
+
+    if let Err(e) =
+        webhook::notify_fetch_content(state.webhook_url.as_deref(), &summary, "api").await
+    {
+        eprintln!("Webhook送信に失敗しました(fetch-content): {}", e);
+    }
+
+    Ok(Json(summary))
 }
 
 #[cfg(test)]
@@ -191,7 +211,7 @@ mod tests {
 
             let rss_links_path = create_temp_rss_links(&server.uri())?;
 
-            let state = ApiState::new(pool.clone(), server.uri(), rss_links_path.clone());
+            let state = ApiState::new(pool.clone(), server.uri(), rss_links_path.clone(), None);
             let app = build_router(state);
 
             let response = app
@@ -290,7 +310,12 @@ mod tests {
             .execute(&pool)
             .await?;
 
-            let state = ApiState::new(pool.clone(), server.uri(), "rss_links.yml".to_string());
+            let state = ApiState::new(
+                pool.clone(),
+                server.uri(),
+                "rss_links.yml".to_string(),
+                None,
+            );
             let app = build_router(state);
 
             let response = app

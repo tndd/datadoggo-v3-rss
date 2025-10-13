@@ -17,6 +17,8 @@ cargo run -- fetch-content
 
 # 3. HTTP経由で処理を呼び出す場合（任意）
 cargo run -- serve --host 127.0.0.1 --port 8080
+
+- 環境変数`WEBHOOK_URL`を指定すると、fetch-rss / fetch-contentの実行結果をWebhookへPOSTする
 ```
 
 ### データフロー

@@ -48,7 +48,7 @@ impl FetchContentSummary {
 }
 
 /// fetch-contentコマンドのメイン処理
-pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
+pub async fn run(pool: PgPool, limit: i64, api_url: &str, webhook_url: Option<&str>) -> Result<()> {
     println!("status_code=NULLまたは非200のエントリを取得中...");
     let summary = execute_fetch_content(&pool, limit, api_url).await?;
 
@@ -86,6 +86,10 @@ pub async fn run(pool: PgPool, limit: i64, api_url: &str) -> Result<()> {
         "\n完了: 本文保存 {}件, statusのみ {}件, エラー {}件",
         summary.saved_count, summary.status_only_count, summary.error_count
     );
+
+    if let Err(e) = crate::webhook::notify_fetch_content(webhook_url, &summary, "cli").await {
+        eprintln!("Webhook送信に失敗しました(fetch-content): {}", e);
+    }
 
     Ok(())
 }
