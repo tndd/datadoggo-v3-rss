@@ -47,6 +47,8 @@ status_codeが200の場合しかここにデータは保存されない。
 | group | text     | グループ名  |
 | name  | text     | リンク名    |
 
+> **注記**: 設計上は`wait_for_selector`や`timeout`など追加パラメータを受け取れるが、現行バージョンでは未対応のため`rss_links.yml`に指定しても処理では利用されない。
+
 # ドメインモデル
 
 ## Article
