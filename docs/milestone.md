@@ -4,7 +4,7 @@
 
 ### 基本方針
 - 単発実行のCLIツール（将来的にバッチ処理化）
-- PostgreSQLを使用（database: `datadoggo-v3`, schema: `rss`）
+- PostgreSQLを使用（production database: `datadoggo_v3`, test database: `test_datadoggo_v3`, schema: `rss`）
 - スクレイピングAPIはモックで実装（本番APIは既存）
 
 ### 実行モデル
@@ -41,14 +41,14 @@ cargo run -- fetch-content
 ### テーブル仕様
 - **queue.id**: UUID（アプリケーションで生成）
 - **queue.link**: UNIQUE制約（重複チェック用）
-- **article_content.data**: Brotli圧縮されたバイナリ
+- **article_content.data**: Brotli圧縮されたバイナリ（PostgreSQLではBYTEA）
 
 ---
 
 ## 実装TODO
 
 ### Phase 1: プロジェクト基盤
-- [ ] Cargo.tomlの依存関係追加
+- [x] Cargo.tomlの依存関係追加
   - sqlx（PostgreSQL、UUID、chrono機能）
   - tokio（非同期ランタイム）
   - reqwest（HTTP client）
@@ -57,41 +57,41 @@ cargo run -- fetch-content
   - serde, serde_yaml（YAML読み込み）
   - dotenv（環境変数）
   - clap（CLI引数パース）
-- [ ] .envファイルのテンプレート作成
-- [ ] sqlx-cliのインストール確認
+- [x] .envファイルのテンプレート作成
+- [x] sqlx-cliのインストール確認
 
 ### Phase 2: データベースセットアップ
-- [ ] マイグレーションファイル作成
+- [x] マイグレーションファイル作成
   - queueテーブル（linkにUNIQUE制約）
   - article_contentテーブル（queue_idに外部キー）
-- [ ] マイグレーション実行確認
+- [x] マイグレーション実行確認
 
 ### Phase 3: 共通モジュール実装
-- [ ] config.rs: 環境変数読み込み
-- [ ] models.rs: Queue, ArticleContent構造体定義
-- [ ] db.rs: データベース接続プール
+- [x] config.rs: 環境変数読み込み
+- [x] models.rs: Queue, ArticleContent構造体定義
+- [x] db.rs: データベース接続プール
 
 ### Phase 4: fetch-rssコマンド実装
-- [ ] rss_links.yml読み込み処理
-- [ ] RSSフィード取得（reqwest）
-- [ ] RSSパース（feed-rs）
-- [ ] queueへのINSERT/UPDATE処理
+- [x] rss_links.yml読み込み処理
+- [x] RSSフィード取得（reqwest）
+- [x] RSSパース（feed-rs）
+- [x] queueへのINSERT/UPDATE処理
   - ON CONFLICT (link) DO UPDATE実装
-- [ ] テスト実装
+- [x] テスト実装
 
 ### Phase 5: fetch-contentコマンド実装
-- [ ] スクレイピングAPIモック実装
-- [ ] queueからstatus_code=NULLのレコード取得
-- [ ] API呼び出し処理
-- [ ] Brotli圧縮処理
-- [ ] article_contentへの保存
-- [ ] queueのstatus_code更新
-- [ ] テスト実装
+- [x] スクレイピングAPIモック実装
+- [x] queueからstatus_code=NULLのレコード取得
+- [x] API呼び出し処理
+- [x] Brotli圧縮処理
+- [x] article_contentへの保存
+- [x] queueのstatus_code更新
+- [x] テスト実装
 
 ### Phase 6: CLIエントリーポイント
-- [ ] main.rs: clap設定
-- [ ] サブコマンド分岐処理
-- [ ] エラーハンドリング
+- [x] main.rs: clap設定
+- [x] サブコマンド分岐処理
+- [x] エラーハンドリング
 
 ### Phase 7: 動作確認
 - [ ] fetch-rssの実動作確認

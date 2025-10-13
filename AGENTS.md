@@ -7,6 +7,7 @@
 - スクレイピングAPIがHTTPエラーを返した場合でも`status_code`を保存するよう`fetch-content`の処理を改修。
 - HTTP 5xx応答をモック化し、`status_code`保持を検証するテストを追加。
 - `fetch_rss`テストの参照方法を明示的な`use crate::...`に揃え、将来のモジュール変更でも追従しやすくした。
+- 本番DB名を`datadoggo_v3`、テストDB名を`test_datadoggo_v3`へ統一し、README/Design/Milestoneに反映。
 
 ## 2025-10-12
 - `fetch-content` フローを外部スクレイピングAPI連携仕様に合わせて再実装。
