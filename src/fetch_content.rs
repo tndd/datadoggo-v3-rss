@@ -394,9 +394,7 @@ mod tests {
 
             Mock::given(method("POST"))
                 .and(path("/fetch"))
-                .respond_with(
-                    ResponseTemplate::new(503).set_body_string("upstream error"),
-                )
+                .respond_with(ResponseTemplate::new(503).set_body_string("upstream error"))
                 .mount(&server)
                 .await;
 

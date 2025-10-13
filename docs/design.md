@@ -19,7 +19,7 @@ linkフィールドについては、blueskyのような例外があるので注
 | updated_at  | timestampz  | 最終更新日時                       |
 | link        | text        | rssフィールドのlink                |
 | title       | text        | rssフィールドのtitle               |
-| pub_data    | timestampz? | rssフィールドのpub_data            |
+| pub_date    | timestampz? | rssフィールドのpub_date            |
 | description | text        | rssのdescriptionフィールド         |
 | status_code | int?        | HTTPステータスコード               |
 | group       | text?       | グループ名。何らかの分類が必要なら |
@@ -61,9 +61,9 @@ queueにarticle_contentをjoinしたもの。
 | updated_at  | timestampz  | queueの最終更新日時        |
 | link        | text        | rssフィールドのlink        |
 | title       | text        | rssフィールドのtitle       |
-| pub_data    | timestampz? | rssフィールドのpub_data    |
+| pub_date    | timestampz? | rssフィールドのpub_date    |
 | description | text        | rssのdescriptionフィールド |
-| data        | tezt        | 記事の内容                 |
+| data        | text        | 記事の内容                 |
 | group       | text?       | グループ名                 |
 
 # api

@@ -39,7 +39,7 @@ cargo run -- fetch-content
 - **.env**: DB接続情報などを記述
 
 ### テーブル仕様
-- **queue.id**: UUID（自動生成）
+- **queue.id**: UUID（アプリケーションで生成）
 - **queue.link**: UNIQUE制約（重複チェック用）
 - **article_content.data**: Brotli圧縮されたバイナリ
 

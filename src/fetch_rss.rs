@@ -58,7 +58,7 @@ pub async fn fetch_and_parse_feed(url: &str, group: Option<&str>) -> Result<Vec<
     Ok(entries)
 }
 
-fn extract_link(entry: &Entry) -> Option<String> {
+pub(crate) fn extract_link(entry: &Entry) -> Option<String> {
     entry
         .links
         .iter()
@@ -80,7 +80,7 @@ fn extract_link(entry: &Entry) -> Option<String> {
         })
 }
 
-fn find_first_url(text: &str) -> Option<String> {
+pub(crate) fn find_first_url(text: &str) -> Option<String> {
     let matched = URL_PATTERN.find(text)?;
     let trimmed = matched
         .as_str()
@@ -184,7 +184,7 @@ pub async fn run(pool: PgPool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     pub mod load_rss {
-        use super::super::load_rss_links;
+        use crate::fetch_rss::load_rss_links;
 
         /// # 検証目的
         /// rss_links.ymlを読み込み、定義済みフィードが存在することを確認する。
@@ -203,7 +203,7 @@ mod tests {
     pub mod extract_link {
         use feed_rs::model::{Content, Entry};
 
-        use super::super::{extract_link, find_first_url};
+        use crate::fetch_rss::{extract_link, find_first_url};
 
         /// # 検証目的
         /// コンテンツ内に含まれるURLを抽出し、末尾の句読点が除去されることを確認する。

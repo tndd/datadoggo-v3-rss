@@ -2,9 +2,11 @@
 
 ## 2025-10-13
 - `rss_links.yml`の追加パラメータは現行未対応である旨をドキュメントに明記。
+- queue/Articleのテーブル仕様を`pub_date`表記へ統一し、`Article.data`の型誤記を修正。
 - UUID生成をアプリケーションで行う方針へ切り替え、`rss.queue`のマイグレーションおよび挿入処理を更新。
 - スクレイピングAPIがHTTPエラーを返した場合でも`status_code`を保存するよう`fetch-content`の処理を改修。
 - HTTP 5xx応答をモック化し、`status_code`保持を検証するテストを追加。
+- `fetch_rss`テストの参照方法を明示的な`use crate::...`に揃え、将来のモジュール変更でも追従しやすくした。
 
 ## 2025-10-12
 - `fetch-content` フローを外部スクレイピングAPI連携仕様に合わせて再実装。
