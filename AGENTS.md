@@ -10,6 +10,8 @@
 - 本番DB名を`datadoggo_v3`、テストDB名を`test_datadoggo_v3`へ統一し、README/Design/Milestoneに反映。
 - `fetch_rss`の解析処理を`parse_feed_content`として分離し、UPSERTとグループ挙動を確認するDBテストを追加。
 - `TEST_DATABASE_URL`未設定時にDBテストを自動スキップするよう`db`・`fetch_rss`のテストを調整。
+- SQLxマイグレーションのバージョン重複を避けるため、ファイル名をユニークなタイムスタンプへ改めた。
+- `fetch_content`のDB結合テストで毎回テーブルを初期化するようにし、重複レコードによる失敗を防止。
 
 ## 2025-10-12
 - `fetch-content` フローを外部スクレイピングAPI連携仕様に合わせて再実装。

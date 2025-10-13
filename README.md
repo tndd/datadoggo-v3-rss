@@ -38,13 +38,13 @@ SCRAPING_API_URL="http://localhost:8000"
 
 ```bash
 # schema作成
-psql -d datadoggo_v3 -f migrations/20251013_001_create_schema.sql
+psql -d datadoggo_v3 -f migrations/202510130001_create_schema.sql
 
 # queueテーブル作成
-psql -d datadoggo_v3 -f migrations/20251013_002_create_queue_table.sql
+psql -d datadoggo_v3 -f migrations/202510130002_create_queue_table.sql
 
 # article_contentテーブル作成
-psql -d datadoggo_v3 -f migrations/20251013_003_create_article_content_table.sql
+psql -d datadoggo_v3 -f migrations/202510130003_create_article_content_table.sql
 ```
 
 ### 4. RSSフィード設定

@@ -253,6 +253,16 @@ mod tests {
             }
         }
 
+        async fn clear_tables(pool: &PgPool) -> Result<()> {
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+
         /// # 検証目的
         /// ステータス200時に本文を圧縮保存し、status_codeを200へ更新できることを確認する。
         #[tokio::test]
@@ -262,6 +272,7 @@ mod tests {
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
 
             let server = MockServer::start().await;
             let html_body = "<html><body><p>ok</p></body></html>";
@@ -330,6 +341,7 @@ mod tests {
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
 
             let server = MockServer::start().await;
 
@@ -389,6 +401,7 @@ mod tests {
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
 
             let server = MockServer::start().await;
 
