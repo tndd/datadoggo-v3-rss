@@ -15,7 +15,7 @@ linkフィールドについては、blueskyのような例外があるので注
 
 | name        | type        | description                        |
 | ----------- | ----------- | ---------------------------------- |
-| id          | uuid(PK)    | ---                                |
+| id          | uuid(PK)    | アプリケーション側で生成するUUID      |
 | created_at  | timestampz  | 作成日時が入る                     |
 | updated_at  | timestampz  | 最終更新日時                       |
 | link        | text        | rssフィールドのlink                |
@@ -66,6 +66,8 @@ queueにarticle_contentをjoinしたもの。
 | description | text        | rssのdescriptionフィールド |
 | data        | bytes       | Brotli圧縮済み記事のバイナリ |
 | group       | text?       | グループ名                 |
+
+アプリケーションでは `Article` 構造体および `search_articles` を提供し、最新の記事をqueueとarticle_contentの結合結果として取得できる。
 
 # api
 記事取得は以下のapiで行う。

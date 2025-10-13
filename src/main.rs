@@ -1,3 +1,4 @@
+mod articles;
 mod config;
 mod db;
 mod fetch_content;

@@ -1,6 +1,8 @@
 # 変更履歴
 
 ## 2025-10-13
+- READMEとDesignにてUUIDがアプリ側生成である旨を明示し、Article取得機能の仕様を追記。
+- Article構造体とsearch_articlesを実装し、結合データ取得のDBテストを追加。
 - `rss_links.yml`の追加パラメータは現行未対応である旨をドキュメントに明記。
 - queue/Articleのテーブル仕様を`pub_date`表記へ統一し、`Article.data`の型誤記を修正。
 - UUID生成をアプリケーションで行う方針へ切り替え、`rss.queue`のマイグレーションおよび挿入処理を更新。

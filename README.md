@@ -82,7 +82,7 @@ cargo run -- fetch-content --limit 50
 
 | カラム       | 型          | 説明                   |
 | ------------ | ----------- | ---------------------- |
-| id           | UUID        | 主キー（自動生成）     |
+| id           | UUID        | 主キー（アプリケーション側で生成） |
 | created_at   | TIMESTAMPTZ | 作成日時               |
 | updated_at   | TIMESTAMPTZ | 更新日時（自動更新）   |
 | link         | TEXT        | 記事URL（UNIQUE制約）  |
