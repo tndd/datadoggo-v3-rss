@@ -90,6 +90,11 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 - `POST /api/fetch-rss` : RSS巡回を実行し、処理結果をJSONで返す
 - `POST /api/fetch-content` : queue内の未取得/失敗レコードを再試行する
   - リクエストボディ例: `{"limit": 100}`（省略時は100件）
+- `GET /api/articles` : 取得済み記事を新しい順に返す
+  - クエリパラメータ `limit`（任意、上限500）と `page_token`（前ページの`next_token`）を受け取る
+  - レスポンスは `{ "items": [...], "next_token": "..." }`
+  - `items[].content_brotli_base64` にBrotli圧縮本文をBase64エンコードした文字列を格納（総レスポンスは約50MBで打ち切り）
+  - 無効な `page_token` を指定した場合は `{"code":"page_token_not_found","message":"page_token is not exist"}` を返す
 - 環境変数`WEBHOOK_URL`を設定している場合、各エンドポイント実行後にサマリをWebhookへ送信
 
 ## テーブル構成
@@ -122,20 +127,22 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 ### テスト実行
 
 ```bash
+# DockerでPostgreSQLを起動する例
+docker run -d \
+  --name postgres-docker \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=testdb \
+  -p 5432:5432 \
+  postgres:16-alpine
+
+# テスト用環境変数を設定
+export TEST_DATABASE_URL="postgres://postgres:postgres@localhost:5432/testdb"
+
 cargo test
 ```
 
-データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。PostgreSQLのテスト用データベースを作成し、以下のように環境変数を設定してください。
-
-```bash
-export TEST_DATABASE_URL="postgresql://user:password@localhost:5432/test_datadoggo_v3"
-
-# テスト用データベースの初期化例
-psql -d postgres -c "DROP DATABASE IF EXISTS test_datadoggo_v3"
-psql -d postgres -c "CREATE DATABASE test_datadoggo_v3"
-```
-
-テストデータベースは毎回初期化される想定のため、本番データベースと共有しないよう注意してください。環境変数が未設定の場合、DB接続を必要とするテストは自動的にスキップされます。
+データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。Dockerの例では上記の通り`postgres://postgres:postgres@localhost:5432/testdb`を指定してください。環境変数が未設定の場合、DB接続を必要とするテストは自動的にスキップされます。
 
 ### コンパイルチェック
 
@@ -149,4 +156,3 @@ cargo check
 - 失敗タスクの再実行機能
 - レート制限実装
 - 並行処理の最適化
-- 記事取得API（読み出し用エンドポイント）

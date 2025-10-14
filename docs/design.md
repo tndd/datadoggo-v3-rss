@@ -116,4 +116,19 @@ CLIに加えてHTTPインターフェースを提供し、外部サービスか�
 - `GET /health` : サーバの稼働確認用エンドポイント。
 - `POST /api/fetch-rss` : RSS巡回を実行し、トータル件数とフィードごとの処理状況をJSONで返す。
 - `POST /api/fetch-content` : queue内の`status_code`がNULLまたは200以外のレコードを対象に再取得し、保存件数/エラー件数などをJSONで返す。リクエストボディで`{"limit":100}`など処理件数を指定できる。
+- `GET /api/articles` : queueとarticle_contentを結合した記事リストを新しい順に返す。クエリパラメータ`limit`（省略時は500、上限500）と`page_token`（前回レスポンスの`next_token`）を受け取り、レスポンスには
+  ```json
+  {
+    "items": [
+      {
+        "id": "...",
+        "created_at": "...",
+        "title": "...",
+        "content_brotli_base64": "..."
+      }
+    ],
+    "next_token": "..."
+  }
+  ```
+  の形式でBase64エンコードされたBrotli本文を含める。レスポンス全体が約50MBを超える場合は手前で打ち切り、続きは`next_token`で取得する。存在しない`page_token`を指定した場合は`{"code":"page_token_not_found","message":"page_token is not exist"}`を返す。
 - 環境変数`WEBHOOK_URL`が設定されている場合、上記処理は`event`（`fetch_rss`/`fetch_content`）と`source`（`cli`/`api`）を含むサマリをWebhookへPOSTする。

@@ -19,6 +19,7 @@ cargo run -- fetch-content
 cargo run -- serve --host 127.0.0.1 --port 8080
 
 - 環境変数`WEBHOOK_URL`を指定すると、fetch-rss / fetch-contentの実行結果をWebhookへPOSTする
+- `GET /api/articles` で取得済み記事を新しい順に配信（Brotli本文はBase64で返却、`page_token`でページング）
 ```
 
 ### データフロー
@@ -135,4 +136,3 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 - 失敗タスクの再実行機能
 - レート制限実装
 - 並行処理の最適化
-- 記事取得API（読み出し用エンドポイント）
