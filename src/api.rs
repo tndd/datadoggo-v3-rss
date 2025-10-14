@@ -278,9 +278,7 @@ mod tests {
         #[tokio::test]
         async fn rssを取得するエンドポイントが動作する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -354,9 +352,7 @@ mod tests {
         #[tokio::test]
         async fn コンテンツ取得apiが成功する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -436,9 +432,7 @@ mod tests {
         #[tokio::test]
         async fn limitが0ならエラーを返す() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -493,9 +487,7 @@ mod tests {
         #[tokio::test]
         async fn rssから記事取得まで連携する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -639,9 +631,7 @@ mod tests {
         #[tokio::test]
         async fn 記事一覧を取得できる() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -740,9 +730,7 @@ mod tests {
         #[tokio::test]
         async fn 無効なトークンでエラーを返す() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -778,9 +766,7 @@ mod tests {
         #[tokio::test]
         async fn 記事一覧のlimitが0ならエラー() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -819,9 +805,7 @@ mod tests {
         #[tokio::test]
         async fn 応答サイズ超過時にエラー() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;

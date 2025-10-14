@@ -124,9 +124,7 @@ mod tests {
         #[tokio::test]
         async fn 記事を取得できる() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
@@ -17,22 +17,18 @@ pub async fn acquire_db_lock() -> MutexGuard<'static, ()> {
     DB_MUTEX.lock().await
 }
 
-/// TEST_DATABASE_URLをもとに接続プールを準備する。未設定の場合はNoneを返す。
-pub async fn prepare_test_pool() -> Option<PgPool> {
+/// TEST_DATABASE_URLをもとに接続プールを準備する。未設定や接続失敗時はエラーを返す。
+pub async fn prepare_test_pool() -> Result<PgPool> {
     dotenv().ok();
-    match std::env::var("TEST_DATABASE_URL") {
-        Ok(url) => match PgPool::connect(&url).await {
-            Ok(pool) => Some(pool),
-            Err(e) => {
-                eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                None
-            }
-        },
-        Err(_) => {
-            eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-            None
-        }
-    }
+
+    let url = std::env::var("TEST_DATABASE_URL")
+        .context("TEST_DATABASE_URLが設定されていません。Dockerのpostgres-dockerなどでテストDBを起動し、環境変数を指定してください")?;
+
+    let pool = PgPool::connect(&url)
+        .await
+        .with_context(|| format!("TEST_DATABASE_URLへ接続できませんでした: {}", url))?;
+
+    Ok(pool)
 }
 
 /// RSS関連テーブルを初期化する。

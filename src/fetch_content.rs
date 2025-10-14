@@ -340,9 +340,7 @@ mod tests {
         #[tokio::test]
         async fn 保存成功で記事が圧縮保存される() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -418,9 +416,7 @@ mod tests {
         #[tokio::test]
         async fn 非200はstatusのみを記録する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -487,9 +483,7 @@ mod tests {
         #[tokio::test]
         async fn httpエラーでもstatusを記録する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -549,9 +543,7 @@ mod tests {
         #[tokio::test]
         async fn 失敗済みレコードを再試行する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;
@@ -633,9 +625,7 @@ mod tests {
         #[tokio::test]
         async fn 未処理が優先され更新日時で並ぶ() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_test_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
             clear_rss_tables(&pool).await?;

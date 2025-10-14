@@ -136,13 +136,13 @@ docker run -d \
   -p 5432:5432 \
   postgres:16-alpine
 
-# テスト用環境変数を設定
-export TEST_DATABASE_URL="postgres://postgres:postgres@localhost:5432/testdb"
+# テスト用環境変数を設定 (.envの値と揃える)
+export TEST_DATABASE_URL="postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3"
 
 cargo test
 ```
 
-データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。Dockerの例では上記の通り`postgres://postgres:postgres@localhost:5432/testdb`を指定してください。環境変数が未設定の場合、DB接続を必要とするテストは自動的にスキップされます。
+データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。Dockerの例では上記の通り`.env`と同じ`postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3`を指定してください。環境変数が未設定の場合はテストが失敗するため、実行前に必ず設定してください。
 
 ### コンパイルチェック
 
