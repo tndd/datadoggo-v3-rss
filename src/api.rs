@@ -18,7 +18,7 @@ use crate::webhook;
 
 const MAX_LIMIT: i64 = 500;
 const UNSPECIFIED_LIMIT: i64 = 500;
-const MAX_RESPONSE_BYTES: usize = 50 * 1024 * 1024;
+pub(crate) const MAX_RESPONSE_BYTES: usize = 50 * 1024 * 1024;
 
 /// APIサーバで共有する状態
 #[derive(Clone)]
@@ -483,6 +483,50 @@ mod tests {
 
             Ok(())
         }
+
+        /// # 検証目的
+        /// limitに0を指定したリクエストが400エラーと`invalid_limit`コードを返すことを確認する。
+        #[tokio::test]
+        async fn limitが0ならエラーを返す() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(&pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(&pool)
+                .await?;
+
+            let state = ApiState::new(
+                pool,
+                "http://localhost:8000".to_string(),
+                "rss_links.yml".to_string(),
+                None,
+            );
+            let app = build_router(state);
+
+            let response = app
+                .oneshot(
+                    Request::post("/api/fetch-content")
+                        .header("content-type", "application/json")
+                        .body(Body::from("{\"limit\":0}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes)?;
+            assert_eq!(body["code"].as_str(), Some("invalid_limit"));
+            assert_eq!(body["message"].as_str(), Some("limitは1以上で指定してください"));
+
+            Ok(())
+        }
     }
 
     pub mod articles_endpoint {
@@ -707,6 +751,88 @@ mod tests {
             let body: Value = serde_json::from_slice(&bytes)?;
             assert_eq!(body["code"].as_str(), Some("page_token_not_found"));
             assert_eq!(body["message"].as_str(), Some("page_token is not exist"));
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// limitに0を指定した場合に400エラーと`invalid_limit`コードが返ることを確認する。
+        #[tokio::test]
+        async fn 記事一覧のlimitが0ならエラー() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let state = ApiState::new(
+                pool,
+                "http://localhost:8000".to_string(),
+                "rss_links.yml".to_string(),
+                None,
+            );
+            let app = build_router(state);
+
+            let response = app
+                .oneshot(Request::get("/api/articles?limit=0").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes)?;
+            assert_eq!(body["code"].as_str(), Some("invalid_limit"));
+            assert_eq!(body["message"].as_str(), Some("limitは1以上で指定してください"));
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// Base64化後に50MB制限を超える記事が含まれる場合に413エラーが返ることを確認する。
+        #[tokio::test]
+        async fn 応答サイズ超過時にエラー() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let large_data = vec![0u8; crate::api::MAX_RESPONSE_BYTES];
+            let article_id = Uuid::new_v4();
+
+            insert_article(
+                &pool,
+                article_id,
+                Utc::now(),
+                "https://example.com/huge",
+                "巨大な記事",
+                "巨大本文",
+                &large_data,
+            )
+            .await?;
+
+            let state = ApiState::new(
+                pool,
+                "http://localhost:8000".to_string(),
+                "rss_links.yml".to_string(),
+                None,
+            );
+            let app = build_router(state);
+
+            let response = app
+                .oneshot(Request::get("/api/articles").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: Value = serde_json::from_slice(&bytes)?;
+            assert_eq!(body["code"].as_str(), Some("article_too_large"));
+            assert!(body["message"].as_str().unwrap_or_default().contains("記事ID"));
 
             Ok(())
         }
