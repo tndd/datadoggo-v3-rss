@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
+use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, MutexGuard};
@@ -18,6 +19,7 @@ pub async fn acquire_db_lock() -> MutexGuard<'static, ()> {
 
 /// TEST_DATABASE_URLをもとに接続プールを準備する。未設定の場合はNoneを返す。
 pub async fn prepare_test_pool() -> Option<PgPool> {
+    dotenv().ok();
     match std::env::var("TEST_DATABASE_URL") {
         Ok(url) => match PgPool::connect(&url).await {
             Ok(pool) => Some(pool),
