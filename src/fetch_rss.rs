@@ -1,17 +1,42 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::time::Duration;
 
 use anyhow::Result;
 use feed_rs::{model::Entry, parser};
+use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use reqwest::Client;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use serde::{Deserialize, Serialize};
+
 use crate::models::{NewQueue, RssFeedSource, RssLinks};
+use crate::webhook;
 
 static URL_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"https?://[^\s\"'<>()]+"#).expect("URL正規表現のコンパイルに失敗"));
+
+/// RSS取得リクエストのタイムアウト秒数（スクレイピング側と揃えている）
+const FETCH_RSS_TIMEOUT_SECS: u64 = 15;
+/// RSS取得時に同時実行する最大フィード数
+const MAX_CONCURRENT_FEED_REQUESTS: usize = 8;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FetchRssFeedResult {
+    pub group: String,
+    pub name: String,
+    pub processed: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FetchRssSummary {
+    pub total_processed: usize,
+    pub feeds: Vec<FetchRssFeedResult>,
+}
 
 /// rss_links.ymlを読み込む
 pub fn load_rss_links(path: &str) -> Result<Vec<RssFeedSource>> {
@@ -21,8 +46,12 @@ pub fn load_rss_links(path: &str) -> Result<Vec<RssFeedSource>> {
 }
 
 /// RSSフィードを取得してパース
-pub async fn fetch_and_parse_feed(url: &str, group: Option<&str>) -> Result<Vec<NewQueue>> {
-    let response = reqwest::get(url).await?;
+pub async fn fetch_and_parse_feed(
+    client: &Client,
+    url: &str,
+    group: Option<&str>,
+) -> Result<Vec<NewQueue>> {
+    let response = client.get(url).send().await?;
     let content = response.bytes().await?;
     parse_feed_content(&content, group)
 }
@@ -139,50 +168,106 @@ pub async fn upsert_queue_entries(
 }
 
 /// fetch-rssコマンドのメイン処理
-pub async fn run(pool: PgPool) -> Result<()> {
+pub async fn run(pool: PgPool, webhook_url: Option<&str>) -> Result<()> {
     println!("rss_links.ymlを読み込み中...");
-    let feeds = load_rss_links("rss_links.yml")?;
+    let summary = execute_fetch_rss(&pool, "rss_links.yml").await?;
 
-    let mut grouped: BTreeMap<String, Vec<RssFeedSource>> = BTreeMap::new();
-    for feed in feeds {
-        grouped.entry(feed.group.clone()).or_default().push(feed);
-    }
-
-    if grouped.is_empty() {
+    if summary.feeds.is_empty() {
         println!("登録されているRSSフィードがありません");
         return Ok(());
     }
 
-    let mut total_count = 0;
+    let mut grouped: BTreeMap<&str, Vec<&FetchRssFeedResult>> = BTreeMap::new();
+    for feed in &summary.feeds {
+        grouped.entry(&feed.group).or_default().push(feed);
+    }
 
     for (group_name, feeds) in grouped {
         println!("\nグループ: {}", group_name);
-
         for feed in feeds {
-            print!("  - {} を取得中... ", feed.name);
-
-            match fetch_and_parse_feed(&feed.url, Some(&feed.group)).await {
-                Ok(entries) => {
-                    let count = entries.len();
-                    match upsert_queue_entries(&pool, entries, Some(feed.group.clone())).await {
-                        Ok(_) => {
-                            println!("✓ {}件の記事を処理", count);
-                            total_count += count;
-                        }
-                        Err(e) => {
-                            println!("✗ DB保存エラー: {}", e);
-                        }
-                    }
+            match &feed.error {
+                Some(err) => {
+                    println!("  - {}: ✗ {}", feed.name, err);
                 }
-                Err(e) => {
-                    println!("✗ 取得エラー: {}", e);
+                None => {
+                    println!("  - {}: ✓ {}件の記事を処理", feed.name, feed.processed);
                 }
             }
         }
     }
 
-    println!("\n合計: {}件の記事を処理しました", total_count);
+    println!("\n合計: {}件の記事を処理しました", summary.total_processed);
+
+    if let Err(e) = webhook::notify_fetch_rss(webhook_url, &summary, "cli").await {
+        eprintln!("Webhook送信に失敗しました(fetch-rss): {}", e);
+    }
+
     Ok(())
+}
+
+/// fetch-rssのメインロジックを実行し、結果を返す
+pub async fn execute_fetch_rss(pool: &PgPool, rss_links_path: &str) -> Result<FetchRssSummary> {
+    let feeds = load_rss_links(rss_links_path)?;
+
+    if feeds.is_empty() {
+        return Ok(FetchRssSummary {
+            total_processed: 0,
+            feeds: Vec::new(),
+        });
+    }
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(FETCH_RSS_TIMEOUT_SECS))
+        .build()?;
+
+    let pool = pool.clone();
+
+    let mut results = stream::iter(feeds.into_iter())
+        .map(|feed| {
+            let client = client.clone();
+            let pool = pool.clone();
+            async move {
+                let group_name = feed.group.clone();
+                let feed_name = feed.name.clone();
+
+                match fetch_and_parse_feed(&client, &feed.url, Some(&feed.group)).await {
+                    Ok(entries) => {
+                        let processed = entries.len();
+                        match upsert_queue_entries(&pool, entries, Some(feed.group.clone())).await {
+                            Ok(_) => FetchRssFeedResult {
+                                group: group_name,
+                                name: feed_name,
+                                processed,
+                                error: None,
+                            },
+                            Err(e) => FetchRssFeedResult {
+                                group: group_name,
+                                name: feed_name,
+                                processed: 0,
+                                error: Some(e.to_string()),
+                            },
+                        }
+                    }
+                    Err(e) => FetchRssFeedResult {
+                        group: group_name,
+                        name: feed_name,
+                        processed: 0,
+                        error: Some(e.to_string()),
+                    },
+                }
+            }
+        })
+        .buffer_unordered(MAX_CONCURRENT_FEED_REQUESTS)
+        .collect::<Vec<_>>()
+        .await;
+
+    results.sort_by(|a, b| a.group.cmp(&b.group).then(a.name.cmp(&b.name)));
+    let total_processed = results.iter().map(|feed| feed.processed).sum();
+
+    Ok(FetchRssSummary {
+        total_processed,
+        feeds: results,
+    })
 }
 
 #[cfg(test)]
@@ -284,39 +369,20 @@ mod tests {
     pub mod upsert_queue_entries {
         use anyhow::Result;
         use chrono::Utc;
-        use sqlx::PgPool;
 
         use crate::fetch_rss::upsert_queue_entries;
         use crate::models::NewQueue;
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが未設定のためスキップ");
-                    None
-                }
-            }
-        }
+        use crate::test_support::{clear_rss_tables, prepare_test_pool};
 
         /// # 検証目的
         /// 初回INSERTでレコードが作成され、feed側のgroup指定が適用されることを確認する。
         #[tokio::test]
         async fn 初回挿入で_feed_groupが保存される() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let entries = vec![
                 NewQueue {
@@ -338,11 +404,12 @@ mod tests {
             let inserted = upsert_queue_entries(&pool, entries, Some("world".to_string())).await?;
             assert_eq!(inserted, 2);
 
-            let records: Vec<(String, Option<String>)> = sqlx::query_as::<_, (String, Option<String>)>(
-                "SELECT link, \"group\" FROM rss.queue ORDER BY link"
-            )
-            .fetch_all(&pool)
-            .await?;
+            let records: Vec<(String, Option<String>)> =
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT link, \"group\" FROM rss.queue ORDER BY link",
+                )
+                .fetch_all(&pool)
+                .await?;
 
             assert_eq!(records.len(), 2);
             for (_, group) in records {
@@ -357,13 +424,10 @@ mod tests {
         #[tokio::test]
         async fn 重複リンクを更新できる() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
-                return Ok(());
-            };
+            let pool = prepare_test_pool().await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE").execute(&pool).await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE").execute(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let initial = vec![NewQueue {
                 link: "https://example.com/item".to_string(),
@@ -386,7 +450,7 @@ mod tests {
             upsert_queue_entries(&pool, updated, None).await?;
 
             let row: (String, String) = sqlx::query_as::<_, (String, String)>(
-                "SELECT title, description FROM rss.queue WHERE link = $1"
+                "SELECT title, description FROM rss.queue WHERE link = $1",
             )
             .bind("https://example.com/item")
             .fetch_one(&pool)
@@ -394,15 +458,127 @@ mod tests {
             assert_eq!(row.0, "New Title");
             assert_eq!(row.1, "New Desc");
 
-            let group: Option<String> = sqlx::query_scalar(
-                "SELECT \"group\" FROM rss.queue WHERE link = $1"
-            )
-            .bind("https://example.com/item")
-            .fetch_one(&pool)
-            .await?;
+            let group: Option<String> =
+                sqlx::query_scalar("SELECT \"group\" FROM rss.queue WHERE link = $1")
+                    .bind("https://example.com/item")
+                    .fetch_one(&pool)
+                    .await?;
             assert_eq!(group.as_deref(), Some("entry"));
 
             Ok(())
+        }
+    }
+
+    pub mod execute_fetch_rss_tests {
+        use anyhow::Result;
+        use std::time::{Duration, Instant};
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::fetch_rss::execute_fetch_rss;
+        use crate::test_support::{clear_rss_tables, create_temp_yaml, prepare_test_pool};
+
+        /// # 検証目的
+        /// フィード取得が失敗した場合にサマリへエラーが記録されることを確認する。
+        #[tokio::test]
+        async fn フィード失敗時にエラーが記録される() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let pool = prepare_test_pool().await?;
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_rss_tables(&pool).await?;
+
+            let server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/feed"))
+                .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+                .mount(&server)
+                .await;
+
+            let temp_file =
+                create_temp_yaml(&format!("test:\n  failure: {url}/feed", url = server.uri()))?;
+
+            let summary =
+                execute_fetch_rss(&pool, temp_file.path().to_string_lossy().as_ref()).await?;
+
+            assert_eq!(summary.total_processed, 0);
+            assert_eq!(summary.feeds.len(), 1);
+            let feed = &summary.feeds[0];
+            assert_eq!(feed.processed, 0);
+            assert!(feed.error.is_some(), "エラーが記録されていない");
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// 複数フィードを並列に取得できることで全体時間が短縮されることを確認する。
+        #[tokio::test]
+        async fn 複数フィードを並列取得する() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let pool = prepare_test_pool().await?;
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_rss_tables(&pool).await?;
+
+            let server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/feed1"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(simple_rss_entry("https://example.com/one"))
+                        .set_delay(Duration::from_millis(500)),
+                )
+                .mount(&server)
+                .await;
+
+            Mock::given(method("GET"))
+                .and(path("/feed2"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(simple_rss_entry("https://example.com/two"))
+                        .set_delay(Duration::from_millis(500)),
+                )
+                .mount(&server)
+                .await;
+
+            let temp_file = create_temp_yaml(&format!(
+                "parallel:\n  first: {url}/feed1\n  second: {url}/feed2\n",
+                url = server.uri()
+            ))?;
+
+            let started = Instant::now();
+            let summary =
+                execute_fetch_rss(&pool, temp_file.path().to_string_lossy().as_ref()).await?;
+            let elapsed = started.elapsed();
+
+            assert_eq!(summary.total_processed, 2);
+            assert!(
+                elapsed < Duration::from_millis(900),
+                "取得が直列実行された可能性があります (elapsed = {:?})",
+                elapsed
+            );
+
+            Ok(())
+        }
+
+        fn simple_rss_entry(link: &str) -> String {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Mock Feed</title>
+    <item>
+      <title>Title</title>
+      <link>{link}</link>
+      <description>desc</description>
+      <pubDate>Mon, 13 Oct 2025 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
+"#
+            )
         }
     }
 }

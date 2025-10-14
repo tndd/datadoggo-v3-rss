@@ -12,8 +12,14 @@
 # 1. RSSフィードから新規記事をqueueに登録
 cargo run -- fetch-rss
 
-# 2. queue内のstatus_code=NULLな記事に対してAPI実行
+# 2. queue内のstatus_code=NULLまたは200以外な記事に対してAPI実行
 cargo run -- fetch-content
+
+# 3. HTTP経由で処理を呼び出す場合（任意）
+cargo run -- serve --host 127.0.0.1 --port 8080
+
+- 環境変数`WEBHOOK_URL`を指定すると、fetch-rss / fetch-contentの実行結果をWebhookへPOSTする
+- `GET /api/articles` で取得済み記事を新しい順に配信（Brotli本文はBase64で返却、`page_token`でページング）
 ```
 
 ### データフロー
@@ -24,10 +30,10 @@ cargo run -- fetch-content
    - 既存レコード（linkが重複）は内容を更新（UPDATE）
 
 2. **コンテンツ取得フェーズ（fetch-content）**
-   - queueからstatus_code=NULLのレコードを取得
+   - queueからstatus_codeがNULLまたは200以外のレコードを取得
    - スクレイピングAPIを呼び出し（Bot対策をすり抜けるため）
    - status_code=200の場合のみarticle_contentに保存（Brotli圧縮）
-   - それ以外のstatus_codeはqueueに記録するのみ
+   - それ以外のstatus_codeはqueueに記録し直す（再試行対象）
 
 ### エラーハンドリング
 - リトライは実装しない
@@ -130,4 +136,3 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 - 失敗タスクの再実行機能
 - レート制限実装
 - 並行処理の最適化
-- 記事取得API（読み出し用エンドポイント）

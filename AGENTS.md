@@ -1,6 +1,19 @@
 # 変更履歴
 
+## 2025-10-14
+- 記事配信用の`/api/articles`エンドポイントを追加し、Brotli本文をBase64エンコードで返却するワイヤーフレームを実装。
+- UUIDベースの`page_token`によるページネーションを導入し、無効トークン時のエラーフォーマットを`{code, message}`形式に統一。
+- レスポンス上限を50MBに制御しつつ記事取得APIの統合テストを追加し、Base64データ整合性とページング動作を検証。
+- READMEおよびDesign/Milestoneに記事配信API仕様とDockerベースのテスト手順を追記。
+- Docker上のPostgreSQL設定に合わせて`.env`の接続情報を`postgres`ユーザ/パスワードへ更新。
+
 ## 2025-10-13
+- fetch-contentでstatus_codeが200以外のレコードも再試行対象にし、処理サマリを返す共通ロジックを整備。
+- axumベースのAPIサーバ（fetch-rss / fetch-content / health）を追加し、HTTPエンドポイントのテストを用意。
+- WEBHOOK_URL設定時に処理サマリをWebhookへ送信する仕組みと通知テストを追加。
+- README・Design・MilestoneにAPIサーバおよび再試行仕様を追記。
+- READMEとDesignにてUUIDがアプリ側生成である旨を明示し、Article取得機能の仕様を追記。
+- Article構造体とsearch_articlesを実装し、結合データ取得のDBテストを追加。
 - `rss_links.yml`の追加パラメータは現行未対応である旨をドキュメントに明記。
 - queue/Articleのテーブル仕様を`pub_date`表記へ統一し、`Article.data`の型誤記を修正。
 - UUID生成をアプリケーションで行う方針へ切り替え、`rss.queue`のマイグレーションおよび挿入処理を更新。
