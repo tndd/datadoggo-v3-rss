@@ -46,6 +46,70 @@ pub async fn search_articles(pool: &PgPool, limit: i64) -> Result<Vec<Article>> 
     Ok(articles)
 }
 
+/// ページネーション用カーソル
+#[derive(Debug, Clone)]
+pub struct ArticleCursor {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 指定したIDのカーソル情報を取得する
+pub async fn find_article_cursor(pool: &PgPool, id: Uuid) -> Result<Option<ArticleCursor>> {
+    let row = sqlx::query_as::<_, (DateTime<Utc>,)>(
+        r#"
+        SELECT created_at
+        FROM rss.queue
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|record| ArticleCursor {
+        id,
+        created_at: record.0,
+    }))
+}
+
+/// ページネーション条件に従い記事を検索する。limitに+αした件数を取得し、呼び出し側で件数調整する想定。
+pub async fn search_articles_window(
+    pool: &PgPool,
+    limit: i64,
+    cursor: Option<&ArticleCursor>,
+) -> Result<Vec<Article>> {
+    let articles = sqlx::query_as::<_, Article>(
+        r#"
+        SELECT
+            q.id,
+            q.created_at,
+            q.updated_at,
+            q.link,
+            q.title,
+            q.pub_date,
+            q.description,
+            ac.data,
+            q."group"
+        FROM rss.queue AS q
+        INNER JOIN rss.article_content AS ac ON ac.queue_id = q.id
+        WHERE (
+            $2::timestamptz IS NULL
+            OR q.created_at < $2
+            OR (q.created_at = $2 AND q.id < $3)
+        )
+        ORDER BY q.created_at DESC, q.id DESC
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .bind(cursor.map(|c| c.created_at))
+    .bind(cursor.map(|c| c.id))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(articles)
+}
+
 #[cfg(test)]
 mod tests {
     pub mod search_articles {
