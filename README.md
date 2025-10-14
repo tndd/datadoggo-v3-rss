@@ -22,7 +22,6 @@ cargo build
 PostgreSQLで以下を実行：
 
 ```sql
-DROP DATABASE IF EXISTS "datadoggo-v3";
 DROP DATABASE IF EXISTS datadoggo_v3;
 CREATE DATABASE datadoggo_v3;
 ```
@@ -101,26 +100,26 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 
 ### rss.queue
 
-| カラム       | 型          | 説明                   |
-| ------------ | ----------- | ---------------------- |
-| id           | UUID        | 主キー（アプリケーション側で生成） |
-| created_at   | TIMESTAMPTZ | 作成日時               |
-| updated_at   | TIMESTAMPTZ | 更新日時（自動更新）   |
-| link         | TEXT        | 記事URL（UNIQUE制約）  |
-| title        | TEXT        | 記事タイトル           |
-| pub_date     | TIMESTAMPTZ | 公開日時（NULL許容）   |
-| description  | TEXT        | 記事説明               |
-| status_code  | INTEGER     | HTTPステータスコード（NULL許容、未取得時はNULL） |
-| group        | TEXT        | グループ名（NULL許容） |
+| カラム      | 型          | 説明                                             |
+| ----------- | ----------- | ------------------------------------------------ |
+| id          | UUID        | 主キー（アプリケーション側で生成）               |
+| created_at  | TIMESTAMPTZ | 作成日時                                         |
+| updated_at  | TIMESTAMPTZ | 更新日時（自動更新）                             |
+| link        | TEXT        | 記事URL（UNIQUE制約）                            |
+| title       | TEXT        | 記事タイトル                                     |
+| pub_date    | TIMESTAMPTZ | 公開日時（NULL許容）                             |
+| description | TEXT        | 記事説明                                         |
+| status_code | INTEGER     | HTTPステータスコード（NULL許容、未取得時はNULL） |
+| group       | TEXT        | グループ名（NULL許容）                           |
 
 ### rss.article_content
 
-| カラム     | 型          | 説明                          |
-| ---------- | ----------- | ----------------------------- |
-| queue_id   | UUID        | 主キー（queue.idへの外部キー）|
-| created_at | TIMESTAMPTZ | 作成日時                      |
-| updated_at | TIMESTAMPTZ | 更新日時（自動更新）          |
-| data       | BYTEA       | Brotli圧縮された記事本文      |
+| カラム     | 型          | 説明                           |
+| ---------- | ----------- | ------------------------------ |
+| queue_id   | UUID        | 主キー（queue.idへの外部キー） |
+| created_at | TIMESTAMPTZ | 作成日時                       |
+| updated_at | TIMESTAMPTZ | 更新日時（自動更新）           |
+| data       | BYTEA       | Brotli圧縮された記事本文       |
 
 ## 開発
 
