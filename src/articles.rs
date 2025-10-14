@@ -114,49 +114,22 @@ pub async fn search_articles_window(
 mod tests {
     pub mod search_articles {
         use anyhow::Result;
-        use chrono::{TimeZone, Utc};
-        use sqlx::PgPool;
         use uuid::Uuid;
 
         use crate::articles::search_articles;
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        async fn clear_tables(pool: &PgPool) -> Result<()> {
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(pool)
-                .await?;
-            Ok(())
-        }
+        use crate::test_support::{clear_rss_tables, fixed_datetime, prepare_test_pool};
 
         /// # 検証目的
         /// queueとarticle_contentを結合した記事が取得でき、limit件数が機能することを確認する。
         #[tokio::test]
         async fn 記事を取得できる() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let first_id = Uuid::new_v4();
             let second_id = Uuid::new_v4();
@@ -172,7 +145,7 @@ mod tests {
             .bind("https://example.com/first")
             .bind("最初の記事")
             .bind("本文1")
-            .bind(Utc.with_ymd_and_hms(2025, 10, 12, 12, 0, 0).single())
+            .bind(Some(fixed_datetime(2025, 10, 12, 12, 0, 0)))
             .bind(Some("world"))
             .execute(&pool)
             .await?;
@@ -187,7 +160,7 @@ mod tests {
             .bind("https://example.com/second")
             .bind("二番目の記事")
             .bind("本文2")
-            .bind(Utc.with_ymd_and_hms(2025, 10, 12, 13, 0, 0).single())
+            .bind(Some(fixed_datetime(2025, 10, 12, 13, 0, 0)))
             .execute(&pool)
             .await?;
 

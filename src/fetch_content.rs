@@ -327,51 +327,25 @@ mod tests {
         use brotli::Decompressor;
         use chrono::Utc;
         use serde_json::json;
-        use sqlx::PgPool;
         use uuid::Uuid;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         use crate::fetch_content::{execute_fetch_content, FetchContentEntryOutcome};
         use crate::models::ArticleContent;
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        async fn clear_tables(pool: &PgPool) -> Result<()> {
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(pool)
-                .await?;
-            Ok(())
-        }
+        use crate::test_support::{clear_rss_tables, prepare_test_pool};
 
         /// # 検証目的
         /// ステータス200時に本文を圧縮保存し、status_codeを200へ更新できることを確認する。
         #[tokio::test]
         async fn 保存成功で記事が圧縮保存される() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
             let html_body = "<html><body><p>ok</p></body></html>";
@@ -444,12 +418,12 @@ mod tests {
         #[tokio::test]
         async fn 非200はstatusのみを記録する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
 
@@ -513,12 +487,12 @@ mod tests {
         #[tokio::test]
         async fn httpエラーでもstatusを記録する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
 
@@ -575,12 +549,12 @@ mod tests {
         #[tokio::test]
         async fn 失敗済みレコードを再試行する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
             let html_body = "<html><body>retry ok</body></html>";
@@ -648,63 +622,23 @@ mod tests {
 
     pub mod search_queue_entries_for_fetch_tests {
         use anyhow::Result;
-        use chrono::{TimeZone, Utc};
-        use sqlx::PgPool;
         use uuid::Uuid;
 
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        async fn clear_tables(pool: &PgPool) -> Result<()> {
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(pool)
-                .await?;
-            Ok(())
-        }
-
-        async fn set_timestamp(pool: &PgPool, id: Uuid, timestamp: chrono::DateTime<chrono::Utc>) -> Result<()> {
-            sqlx::query(
-                r#"
-                UPDATE rss.queue
-                SET created_at = $2, updated_at = $2
-                WHERE id = $1
-                "#,
-            )
-            .bind(id)
-            .bind(timestamp)
-            .execute(pool)
-            .await?;
-
-            Ok(())
-        }
+        use crate::test_support::{
+            clear_rss_tables, fixed_datetime, prepare_test_pool, set_queue_timestamp,
+        };
 
         /// # 検証目的
         /// 未処理エントリが優先され、updated_at昇順で取得されることを確認する。
         #[tokio::test]
         async fn 未処理が優先され更新日時で並ぶ() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let first_id = Uuid::new_v4();
             let second_id = Uuid::new_v4();
@@ -750,28 +684,16 @@ mod tests {
             .execute(&pool)
             .await?;
 
-            set_timestamp(
-                &pool,
-                first_id,
-                Utc.with_ymd_and_hms(2025, 10, 12, 9, 0, 0).single().expect("timestamp"),
-            )
-            .await?;
-            set_timestamp(
-                &pool,
-                second_id,
-                Utc.with_ymd_and_hms(2025, 10, 12, 10, 0, 0).single().expect("timestamp"),
-            )
-            .await?;
-            set_timestamp(
-                &pool,
-                third_id,
-                Utc.with_ymd_and_hms(2025, 10, 12, 8, 0, 0).single().expect("timestamp"),
-            )
-            .await?;
+            set_queue_timestamp(&pool, first_id, fixed_datetime(2025, 10, 12, 9, 0, 0)).await?;
+            set_queue_timestamp(&pool, second_id, fixed_datetime(2025, 10, 12, 10, 0, 0)).await?;
+            set_queue_timestamp(&pool, third_id, fixed_datetime(2025, 10, 12, 8, 0, 0)).await?;
 
             let entries = super::super::search_queue_entries_for_fetch(&pool, 10).await?;
             assert_eq!(entries.len(), 3);
-            assert_eq!(entries[0].id, first_id, "最初はNULLで最も古いupdated_atを期待");
+            assert_eq!(
+                entries[0].id, first_id,
+                "最初はNULLで最も古いupdated_atを期待"
+            );
             assert_eq!(entries[1].id, second_id, "次は同じくNULLで次のupdated_at");
             assert_eq!(entries[2].id, third_id, "最後に再試行対象のエントリが来る");
 

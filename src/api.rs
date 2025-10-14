@@ -262,65 +262,28 @@ async fn list_articles_handler(
 #[cfg(test)]
 mod tests {
     pub mod fetch_rss_endpoint {
-        use std::fs;
-        use std::io::Write;
-
         use anyhow::Result;
         use axum::body::{to_bytes, Body};
         use axum::http::{Request, StatusCode};
         use serde_json::Value;
-        use sqlx::PgPool;
         use tower::ServiceExt;
-        use uuid::Uuid;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         use crate::api::{build_router, ApiState};
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        fn create_temp_rss_links(server_url: &str) -> Result<String> {
-            let path = std::env::temp_dir().join(format!("rss_links_test_{}.yml", Uuid::new_v4()));
-            let mut file = fs::File::create(&path)?;
-            writeln!(
-                file,
-                "test:
-  sample: {url}/feed",
-                url = server_url
-            )?;
-            Ok(path.to_string_lossy().to_string())
-        }
+        use crate::test_support::{clear_rss_tables, create_temp_yaml, prepare_test_pool};
 
         /// # 検証目的
         /// API経由でRSS取得処理が実行され、結果がJSONで返ることを確認する。
         #[tokio::test]
         async fn rssを取得するエンドポイントが動作する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(&pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(&pool)
-                .await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
             let rss_body = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -343,9 +306,15 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let rss_links_path = create_temp_rss_links(&server.uri())?;
+            let temp_file =
+                create_temp_yaml(&format!("test:\n  sample: {url}/feed", url = server.uri()))?;
 
-            let state = ApiState::new(pool.clone(), server.uri(), rss_links_path.clone(), None);
+            let state = ApiState::new(
+                pool.clone(),
+                server.uri(),
+                temp_file.path().to_string_lossy().to_string(),
+                None,
+            );
             let app = build_router(state);
 
             let response = app
@@ -359,7 +328,6 @@ mod tests {
             let value: Value = serde_json::from_slice(&bytes)?;
             assert_eq!(value["total_processed"].as_u64(), Some(1));
 
-            fs::remove_file(rss_links_path)?;
             Ok(())
         }
     }
@@ -372,7 +340,6 @@ mod tests {
         use axum::http::{Request, StatusCode};
         use brotli::Decompressor;
         use serde_json::json;
-        use sqlx::PgPool;
         use tower::ServiceExt;
         use uuid::Uuid;
         use wiremock::matchers::{method, path};
@@ -380,39 +347,19 @@ mod tests {
 
         use crate::api::{build_router, ApiState};
         use crate::models::ArticleContent;
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
+        use crate::test_support::{clear_rss_tables, prepare_test_pool};
 
         /// # 検証目的
         /// API経由でコンテンツ取得処理を実行し、本文保存とレスポンス内容を確認する。
         #[tokio::test]
         async fn コンテンツ取得apiが成功する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(&pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(&pool)
-                .await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
             let html_body = "<html><body>api ok</body></html>";
@@ -489,17 +436,12 @@ mod tests {
         #[tokio::test]
         async fn limitが0ならエラーを返す() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(&pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(&pool)
-                .await?;
+            clear_rss_tables(&pool).await?;
 
             let state = ApiState::new(
                 pool,
@@ -523,81 +465,45 @@ mod tests {
             let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             let body: serde_json::Value = serde_json::from_slice(&bytes)?;
             assert_eq!(body["code"].as_str(), Some("invalid_limit"));
-            assert_eq!(body["message"].as_str(), Some("limitは1以上で指定してください"));
+            assert_eq!(
+                body["message"].as_str(),
+                Some("limitは1以上で指定してください")
+            );
 
             Ok(())
         }
     }
 
     pub mod pipeline_flow {
-        use std::fs;
-        use std::io::{Cursor, Read, Write};
+        use std::io::{Cursor, Read};
 
         use anyhow::Result;
         use brotli::Decompressor;
         use serde_json::json;
-        use sqlx::PgPool;
-        use uuid::Uuid;
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         use crate::articles::search_articles_window;
         use crate::fetch_content::execute_fetch_content;
         use crate::fetch_rss::execute_fetch_rss;
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        async fn clear_tables(pool: &PgPool) -> Result<()> {
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(pool)
-                .await?;
-            Ok(())
-        }
-
-        fn create_temp_rss_links(server_url: &str) -> Result<String> {
-            let path = std::env::temp_dir().join(format!("rss_links_pipeline_{}.yml", Uuid::new_v4()));
-            let mut file = fs::File::create(&path)?;
-            writeln!(
-                file,
-                "integration:\n  sample: {url}/feed",
-                url = server_url
-            )?;
-            Ok(path.to_string_lossy().to_string())
-        }
+        use crate::test_support::{clear_rss_tables, create_temp_yaml, prepare_test_pool};
 
         /// # 検証目的
         /// RSS取り込みから本文保存、記事取得まで一連の流れが動作することを確認する。
         #[tokio::test]
         async fn rssから記事取得まで連携する() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let server = MockServer::start().await;
 
-            let rss_body = r#"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-                <rss version=\"2.0\">
+            let rss_body = r#"<?xml version="1.0" encoding="UTF-8"?>
+                <rss version="2.0">
                   <channel>
                     <title>Integration Feed</title>
                     <item>
@@ -631,9 +537,13 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let rss_links_path = create_temp_rss_links(&server.uri())?;
+            let temp_file = create_temp_yaml(&format!(
+                "integration:\n  sample: {url}/feed",
+                url = server.uri()
+            ))?;
 
-            let rss_summary = execute_fetch_rss(&pool, &rss_links_path).await?;
+            let rss_summary =
+                execute_fetch_rss(&pool, temp_file.path().to_string_lossy().as_ref()).await?;
             assert_eq!(rss_summary.total_processed, 1);
 
             let fetch_summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
@@ -651,15 +561,12 @@ mod tests {
             decompressor.read_to_string(&mut decompressed)?;
             assert_eq!(decompressed, html_body);
 
-            let status: Option<i32> = sqlx::query_scalar(
-                "SELECT status_code FROM rss.queue WHERE id = $1",
-            )
-            .bind(article.id)
-            .fetch_one(&pool)
-            .await?;
+            let status: Option<i32> =
+                sqlx::query_scalar("SELECT status_code FROM rss.queue WHERE id = $1")
+                    .bind(article.id)
+                    .fetch_one(&pool)
+                    .await?;
             assert_eq!(status, Some(200));
-
-            fs::remove_file(rss_links_path)?;
 
             Ok(())
         }
@@ -677,32 +584,7 @@ mod tests {
         use uuid::Uuid;
 
         use crate::api::{build_router, ApiState};
-
-        async fn prepare_pool() -> Option<PgPool> {
-            match std::env::var("TEST_DATABASE_URL") {
-                Ok(url) => match PgPool::connect(&url).await {
-                    Ok(pool) => Some(pool),
-                    Err(e) => {
-                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
-                        None
-                    }
-                },
-                Err(_) => {
-                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
-                    None
-                }
-            }
-        }
-
-        async fn clear_tables(pool: &PgPool) -> Result<()> {
-            sqlx::query("TRUNCATE rss.article_content CASCADE")
-                .execute(pool)
-                .await?;
-            sqlx::query("TRUNCATE rss.queue CASCADE")
-                .execute(pool)
-                .await?;
-            Ok(())
-        }
+        use crate::test_support::{clear_rss_tables, prepare_test_pool};
 
         async fn insert_article(
             pool: &PgPool,
@@ -757,12 +639,12 @@ mod tests {
         #[tokio::test]
         async fn 記事一覧を取得できる() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let newer_id = Uuid::new_v4();
             let older_id = Uuid::new_v4();
@@ -858,12 +740,12 @@ mod tests {
         #[tokio::test]
         async fn 無効なトークンでエラーを返す() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let state = ApiState::new(
                 pool,
@@ -896,12 +778,12 @@ mod tests {
         #[tokio::test]
         async fn 記事一覧のlimitが0ならエラー() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let state = ApiState::new(
                 pool,
@@ -912,7 +794,11 @@ mod tests {
             let app = build_router(state);
 
             let response = app
-                .oneshot(Request::get("/api/articles?limit=0").body(Body::empty()).unwrap())
+                .oneshot(
+                    Request::get("/api/articles?limit=0")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
                 .await
                 .unwrap();
 
@@ -920,7 +806,10 @@ mod tests {
             let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             let body: Value = serde_json::from_slice(&bytes)?;
             assert_eq!(body["code"].as_str(), Some("invalid_limit"));
-            assert_eq!(body["message"].as_str(), Some("limitは1以上で指定してください"));
+            assert_eq!(
+                body["message"].as_str(),
+                Some("limitは1以上で指定してください")
+            );
 
             Ok(())
         }
@@ -930,12 +819,12 @@ mod tests {
         #[tokio::test]
         async fn 応答サイズ超過時にエラー() -> Result<()> {
             let _lock = crate::test_support::acquire_db_lock().await;
-            let Some(pool) = prepare_pool().await else {
+            let Some(pool) = prepare_test_pool().await else {
                 return Ok(());
             };
 
             sqlx::migrate!("./migrations").run(&pool).await?;
-            clear_tables(&pool).await?;
+            clear_rss_tables(&pool).await?;
 
             let large_data = vec![0u8; crate::api::MAX_RESPONSE_BYTES];
             let article_id = Uuid::new_v4();
@@ -968,7 +857,10 @@ mod tests {
             let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             let body: Value = serde_json::from_slice(&bytes)?;
             assert_eq!(body["code"].as_str(), Some("article_too_large"));
-            assert!(body["message"].as_str().unwrap_or_default().contains("記事ID"));
+            assert!(body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("記事ID"));
 
             Ok(())
         }
