@@ -5,6 +5,7 @@
 - UUIDベースの`page_token`によるページネーションを導入し、無効トークン時のエラーフォーマットを`{code, message}`形式に統一。
 - レスポンス上限を50MBに制御しつつ記事取得APIの統合テストを追加し、Base64データ整合性とページング動作を検証。
 - READMEおよびDesign/Milestoneに記事配信API仕様とDockerベースのテスト手順を追記。
+- Docker上のPostgreSQL設定に合わせて`.env`の接続情報を`postgres`ユーザ/パスワードへ更新。
 
 ## 2025-10-13
 - fetch-contentでstatus_codeが200以外のレコードも再試行対象にし、処理サマリを返す共通ロジックを整備。
