@@ -646,6 +646,139 @@ mod tests {
         }
     }
 
+    pub mod search_queue_entries_for_fetch_tests {
+        use anyhow::Result;
+        use chrono::{TimeZone, Utc};
+        use sqlx::PgPool;
+        use uuid::Uuid;
+
+        async fn prepare_pool() -> Option<PgPool> {
+            match std::env::var("TEST_DATABASE_URL") {
+                Ok(url) => match PgPool::connect(&url).await {
+                    Ok(pool) => Some(pool),
+                    Err(e) => {
+                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
+                    None
+                }
+            }
+        }
+
+        async fn clear_tables(pool: &PgPool) -> Result<()> {
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+
+        async fn set_timestamp(pool: &PgPool, id: Uuid, timestamp: chrono::DateTime<chrono::Utc>) -> Result<()> {
+            sqlx::query(
+                r#"
+                UPDATE rss.queue
+                SET created_at = $2, updated_at = $2
+                WHERE id = $1
+                "#,
+            )
+            .bind(id)
+            .bind(timestamp)
+            .execute(pool)
+            .await?;
+
+            Ok(())
+        }
+
+        /// # 検証目的
+        /// 未処理エントリが優先され、updated_at昇順で取得されることを確認する。
+        #[tokio::test]
+        async fn 未処理が優先され更新日時で並ぶ() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let first_id = Uuid::new_v4();
+            let second_id = Uuid::new_v4();
+            let third_id = Uuid::new_v4();
+
+            sqlx::query(
+                r#"
+                INSERT INTO rss.queue (id, link, title, description)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(first_id)
+            .bind("https://example.com/null-early")
+            .bind("NULL早期")
+            .bind("説明1")
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO rss.queue (id, link, title, description)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(second_id)
+            .bind("https://example.com/null-late")
+            .bind("NULL後期")
+            .bind("説明2")
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO rss.queue (id, link, title, description, status_code)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+            )
+            .bind(third_id)
+            .bind("https://example.com/failed")
+            .bind("失敗済み")
+            .bind("説明3")
+            .bind(503)
+            .execute(&pool)
+            .await?;
+
+            set_timestamp(
+                &pool,
+                first_id,
+                Utc.with_ymd_and_hms(2025, 10, 12, 9, 0, 0).single().expect("timestamp"),
+            )
+            .await?;
+            set_timestamp(
+                &pool,
+                second_id,
+                Utc.with_ymd_and_hms(2025, 10, 12, 10, 0, 0).single().expect("timestamp"),
+            )
+            .await?;
+            set_timestamp(
+                &pool,
+                third_id,
+                Utc.with_ymd_and_hms(2025, 10, 12, 8, 0, 0).single().expect("timestamp"),
+            )
+            .await?;
+
+            let entries = super::super::search_queue_entries_for_fetch(&pool, 10).await?;
+            assert_eq!(entries.len(), 3);
+            assert_eq!(entries[0].id, first_id, "最初はNULLで最も古いupdated_atを期待");
+            assert_eq!(entries[1].id, second_id, "次は同じくNULLで次のupdated_at");
+            assert_eq!(entries[2].id, third_id, "最後に再試行対象のエントリが来る");
+
+            Ok(())
+        }
+    }
+
     pub mod compress_html {
         use std::io::{Cursor, Read};
 

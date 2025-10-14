@@ -529,6 +529,142 @@ mod tests {
         }
     }
 
+    pub mod pipeline_flow {
+        use std::fs;
+        use std::io::{Cursor, Read, Write};
+
+        use anyhow::Result;
+        use brotli::Decompressor;
+        use serde_json::json;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::articles::search_articles_window;
+        use crate::fetch_content::execute_fetch_content;
+        use crate::fetch_rss::execute_fetch_rss;
+
+        async fn prepare_pool() -> Option<PgPool> {
+            match std::env::var("TEST_DATABASE_URL") {
+                Ok(url) => match PgPool::connect(&url).await {
+                    Ok(pool) => Some(pool),
+                    Err(e) => {
+                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
+                    None
+                }
+            }
+        }
+
+        async fn clear_tables(pool: &PgPool) -> Result<()> {
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+
+        fn create_temp_rss_links(server_url: &str) -> Result<String> {
+            let path = std::env::temp_dir().join(format!("rss_links_pipeline_{}.yml", Uuid::new_v4()));
+            let mut file = fs::File::create(&path)?;
+            writeln!(
+                file,
+                "integration:\n  sample: {url}/feed",
+                url = server_url
+            )?;
+            Ok(path.to_string_lossy().to_string())
+        }
+
+        /// # 検証目的
+        /// RSS取り込みから本文保存、記事取得まで一連の流れが動作することを確認する。
+        #[tokio::test]
+        async fn rssから記事取得まで連携する() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let server = MockServer::start().await;
+
+            let rss_body = r#"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+                <rss version=\"2.0\">
+                  <channel>
+                    <title>Integration Feed</title>
+                    <item>
+                      <title>Item Title</title>
+                      <link>https://example.com/item</link>
+                      <description>本文サマリ</description>
+                      <pubDate>Mon, 13 Oct 2025 12:00:00 GMT</pubDate>
+                    </item>
+                  </channel>
+                </rss>
+            "#;
+
+            Mock::given(method("GET"))
+                .and(path("/feed"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(rss_body))
+                .mount(&server)
+                .await;
+
+            let html_body = "<html><body>integration ok</body></html>";
+
+            Mock::given(method("POST"))
+                .and(path("/fetch"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "html": html_body,
+                    "status_code": 200,
+                    "title": "Integration",
+                    "final_url": "https://example.com/item",
+                    "elapsed_ms": 12.3,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                })))
+                .mount(&server)
+                .await;
+
+            let rss_links_path = create_temp_rss_links(&server.uri())?;
+
+            let rss_summary = execute_fetch_rss(&pool, &rss_links_path).await?;
+            assert_eq!(rss_summary.total_processed, 1);
+
+            let fetch_summary = execute_fetch_content(&pool, 10, &server.uri()).await?;
+            assert_eq!(fetch_summary.saved_count, 1);
+            assert_eq!(fetch_summary.status_only_count, 0);
+
+            let articles = search_articles_window(&pool, 10, None).await?;
+            assert_eq!(articles.len(), 1);
+            let article = &articles[0];
+            assert_eq!(article.link, "https://example.com/item");
+            assert_eq!(article.title, "Item Title");
+
+            let mut decompressor = Decompressor::new(Cursor::new(article.data.clone()), 4096);
+            let mut decompressed = String::new();
+            decompressor.read_to_string(&mut decompressed)?;
+            assert_eq!(decompressed, html_body);
+
+            let status: Option<i32> = sqlx::query_scalar(
+                "SELECT status_code FROM rss.queue WHERE id = $1",
+            )
+            .bind(article.id)
+            .fetch_one(&pool)
+            .await?;
+            assert_eq!(status, Some(200));
+
+            fs::remove_file(rss_links_path)?;
+
+            Ok(())
+        }
+    }
+
     pub mod articles_endpoint {
         use anyhow::Result;
         use axum::body::{to_bytes, Body};

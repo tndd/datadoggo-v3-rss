@@ -483,4 +483,89 @@ mod tests {
             Ok(())
         }
     }
+
+    pub mod execute_fetch_rss_tests {
+        use std::fs;
+        use std::io::Write;
+
+        use anyhow::Result;
+        use sqlx::PgPool;
+        use uuid::Uuid;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use crate::fetch_rss::execute_fetch_rss;
+
+        async fn prepare_pool() -> Option<PgPool> {
+            match std::env::var("TEST_DATABASE_URL") {
+                Ok(url) => match PgPool::connect(&url).await {
+                    Ok(pool) => Some(pool),
+                    Err(e) => {
+                        eprintln!("TEST_DATABASE_URLへ接続できないためスキップ: {}", e);
+                        None
+                    }
+                },
+                Err(_) => {
+                    eprintln!("TEST_DATABASE_URLが設定されていないためスキップ");
+                    None
+                }
+            }
+        }
+
+        async fn clear_tables(pool: &PgPool) -> Result<()> {
+            sqlx::query("TRUNCATE rss.article_content CASCADE")
+                .execute(pool)
+                .await?;
+            sqlx::query("TRUNCATE rss.queue CASCADE")
+                .execute(pool)
+                .await?;
+            Ok(())
+        }
+
+        fn create_temp_rss_links(server_url: &str) -> Result<String> {
+            let path = std::env::temp_dir().join(format!("rss_links_error_{}.yml", Uuid::new_v4()));
+            let mut file = fs::File::create(&path)?;
+            writeln!(
+                file,
+                "test:\n  failure: {url}/feed",
+                url = server_url
+            )?;
+            Ok(path.to_string_lossy().to_string())
+        }
+
+        /// # 検証目的
+        /// フィード取得が失敗した場合にサマリへエラーが記録されることを確認する。
+        #[tokio::test]
+        async fn フィード失敗時にエラーが記録される() -> Result<()> {
+            let _lock = crate::test_support::acquire_db_lock().await;
+            let Some(pool) = prepare_pool().await else {
+                return Ok(());
+            };
+
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            clear_tables(&pool).await?;
+
+            let server = MockServer::start().await;
+
+            Mock::given(method("GET"))
+                .and(path("/feed"))
+                .respond_with(ResponseTemplate::new(500).set_body_string("error"))
+                .mount(&server)
+                .await;
+
+            let rss_links_path = create_temp_rss_links(&server.uri())?;
+
+            let summary = execute_fetch_rss(&pool, &rss_links_path).await?;
+
+            assert_eq!(summary.total_processed, 0);
+            assert_eq!(summary.feeds.len(), 1);
+            let feed = &summary.feeds[0];
+            assert_eq!(feed.processed, 0);
+            assert!(feed.error.is_some(), "エラーが記録されていない");
+
+            fs::remove_file(rss_links_path)?;
+
+            Ok(())
+        }
+    }
 }
