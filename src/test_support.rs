@@ -21,8 +21,33 @@ pub async fn acquire_db_lock() -> MutexGuard<'static, ()> {
 pub async fn prepare_test_pool() -> Result<PgPool> {
     dotenv().ok();
 
-    let url = std::env::var("TEST_DATABASE_URL")
-        .context("TEST_DATABASE_URLが設定されていません。Dockerのpostgres-dockerなどでテストDBを起動し、環境変数を指定してください")?;
+    if std::env::var("TEST_DATABASE_URL").is_err() {
+        if let Ok(database_url) = std::env::var("DATABASE_URL") {
+            if let Some((prefix, _)) = database_url.rsplit_once('/') {
+                let fallback = format!("{}/test_datadoggo_v3", prefix);
+                eprintln!(
+                    "TEST_DATABASE_URLが未設定のためDATABASE_URLから派生した{}を使用します",
+                    fallback
+                );
+                std::env::set_var("TEST_DATABASE_URL", fallback);
+            } else {
+                eprintln!("TEST_DATABASE_URLが未設定のためDATABASE_URLをそのまま使用します");
+                std::env::set_var("TEST_DATABASE_URL", database_url);
+            }
+        } else {
+            let default_url =
+                "postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3";
+            eprintln!(
+                "TEST_DATABASE_URLが未設定のため既定値({})を使用します",
+                default_url
+            );
+            std::env::set_var("TEST_DATABASE_URL", default_url);
+        }
+    }
+
+    let url = std::env::var("TEST_DATABASE_URL").context(
+        "TEST_DATABASE_URLが設定されていません。Dockerのpostgres-dockerなどでテストDBを起動し、環境変数を指定してください",
+    )?;
 
     let pool = PgPool::connect(&url)
         .await
