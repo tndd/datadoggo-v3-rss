@@ -9,6 +9,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
 use sqlx::PgPool;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use serde::{Deserialize, Serialize};
@@ -169,40 +170,49 @@ pub async fn upsert_queue_entries(
 
 /// fetch-rssコマンドのメイン処理
 pub async fn run(pool: PgPool, webhook_url: Option<&str>) -> Result<()> {
-    println!("rss_links.ymlを読み込み中...");
+    info!("rss_links.ymlを読み込み中...");
     let summary = execute_fetch_rss(&pool, "rss_links.yml").await?;
 
     if summary.feeds.is_empty() {
-        println!("登録されているRSSフィードがありません");
+        info!("登録されているRSSフィードがありません");
         return Ok(());
     }
 
+    log_fetch_rss_summary(&summary);
+
+    if let Err(e) = webhook::notify_fetch_rss(webhook_url, &summary, "cli").await {
+        warn!(error = %e, "Webhook送信に失敗しました(fetch-rss)");
+    }
+
+    Ok(())
+}
+
+pub(crate) fn log_fetch_rss_summary(summary: &FetchRssSummary) {
     let mut grouped: BTreeMap<&str, Vec<&FetchRssFeedResult>> = BTreeMap::new();
     for feed in &summary.feeds {
         grouped.entry(&feed.group).or_default().push(feed);
     }
 
     for (group_name, feeds) in grouped {
-        println!("\nグループ: {}", group_name);
+        info!(group = group_name, "グループの処理結果");
         for feed in feeds {
             match &feed.error {
                 Some(err) => {
-                    println!("  - {}: ✗ {}", feed.name, err);
+                    error!(group = %feed.group, name = %feed.name, %err, "RSS処理に失敗");
                 }
                 None => {
-                    println!("  - {}: ✓ {}件の記事を処理", feed.name, feed.processed);
+                    info!(
+                        group = %feed.group,
+                        name = %feed.name,
+                        processed = feed.processed,
+                        "RSSを処理"
+                    );
                 }
             }
         }
     }
 
-    println!("\n合計: {}件の記事を処理しました", summary.total_processed);
-
-    if let Err(e) = webhook::notify_fetch_rss(webhook_url, &summary, "cli").await {
-        eprintln!("Webhook送信に失敗しました(fetch-rss): {}", e);
-    }
-
-    Ok(())
+    info!(total_processed = summary.total_processed, "RSS処理が完了");
 }
 
 /// fetch-rssのメインロジックを実行し、結果を返す
