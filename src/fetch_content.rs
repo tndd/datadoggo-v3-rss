@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, Transaction};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
@@ -49,49 +50,68 @@ impl FetchContentSummary {
 
 /// fetch-contentコマンドのメイン処理
 pub async fn run(pool: PgPool, limit: i64, api_url: &str, webhook_url: Option<&str>) -> Result<()> {
-    println!("status_code=NULLまたは非200のエントリを取得中...");
+    info!("status_code=NULLまたは非200のエントリを取得中...");
     let summary = execute_fetch_content(&pool, limit, api_url).await?;
 
     if summary.entries.is_empty() {
-        println!("処理対象のエントリがありません");
+        info!("処理対象のエントリがありません");
         return Ok(());
     }
 
-    println!("{}件のエントリを処理します\n", summary.entries.len());
+    info!("{}件のエントリを処理します", summary.entries.len());
+    log_fetch_content_summary(&summary);
 
+    if let Err(e) = crate::webhook::notify_fetch_content(webhook_url, &summary, "cli").await {
+        warn!(error = %e, "Webhook送信に失敗しました(fetch-content)");
+    }
+
+    Ok(())
+}
+
+pub(crate) fn log_fetch_content_summary(summary: &FetchContentSummary) {
     for entry in &summary.entries {
         match &entry.result {
             FetchContentEntryOutcome::Saved { status_code } => {
-                println!(
-                    "  - {} ... ✓ 保存完了 (status: {})",
-                    entry.title, status_code
+                info!(
+                    queue_id = %entry.queue_id,
+                    title = %entry.title,
+                    status = status_code,
+                    "保存完了"
                 );
             }
             FetchContentEntryOutcome::StatusOnly { status_code } => {
-                println!(
-                    "  - {} ... ✓ status_codeのみ記録 (status: {})",
-                    entry.title, status_code
+                warn!(
+                    queue_id = %entry.queue_id,
+                    title = %entry.title,
+                    status = status_code,
+                    "status_codeのみ記録"
                 );
             }
             FetchContentEntryOutcome::ApiError { message } => {
-                println!("  - {} ... ✗ APIエラー: {}", entry.title, message);
+                error!(
+                    queue_id = %entry.queue_id,
+                    title = %entry.title,
+                    %message,
+                    "APIエラー"
+                );
             }
             FetchContentEntryOutcome::PersistError { message } => {
-                println!("  - {} ... ✗ 保存エラー: {}", entry.title, message);
+                error!(
+                    queue_id = %entry.queue_id,
+                    title = %entry.title,
+                    %message,
+                    "保存エラー"
+                );
             }
         }
     }
 
-    println!(
-        "\n完了: 本文保存 {}件, statusのみ {}件, エラー {}件",
-        summary.saved_count, summary.status_only_count, summary.error_count
+    info!(
+        saved = summary.saved_count,
+        status_only = summary.status_only_count,
+        errors = summary.error_count,
+        "処理完了"
     );
-
-    if let Err(e) = crate::webhook::notify_fetch_content(webhook_url, &summary, "cli").await {
-        eprintln!("Webhook送信に失敗しました(fetch-content): {}", e);
-    }
-
-    Ok(())
 }
 
 /// fetch-contentのメインロジックを実行し、結果を返す
@@ -609,6 +629,54 @@ mod tests {
             assert_eq!(decompressed, html_body);
 
             Ok(())
+        }
+    }
+
+    pub mod log_fetch_content_summary {
+        use tracing_test::traced_test;
+        use uuid::Uuid;
+
+        use crate::fetch_content::{
+            log_fetch_content_summary, FetchContentEntryOutcome, FetchContentEntryReport,
+            FetchContentSummary,
+        };
+
+        /// # 検証目的
+        /// 保存成功・status更新のみ・エラーの各結果に対応したログが出力されることを確認する。
+        #[traced_test]
+        #[test]
+        fn 集計ログが出力される() {
+            let summary = FetchContentSummary {
+                saved_count: 1,
+                status_only_count: 1,
+                error_count: 1,
+                entries: vec![
+                    FetchContentEntryReport {
+                        queue_id: Uuid::new_v4(),
+                        title: "保存記事".to_string(),
+                        result: FetchContentEntryOutcome::Saved { status_code: 200 },
+                    },
+                    FetchContentEntryReport {
+                        queue_id: Uuid::new_v4(),
+                        title: "ステータスのみ".to_string(),
+                        result: FetchContentEntryOutcome::StatusOnly { status_code: 500 },
+                    },
+                    FetchContentEntryReport {
+                        queue_id: Uuid::new_v4(),
+                        title: "エラー".to_string(),
+                        result: FetchContentEntryOutcome::ApiError {
+                            message: "API error".to_string(),
+                        },
+                    },
+                ],
+            };
+
+            log_fetch_content_summary(&summary);
+
+            assert!(logs_contain("保存完了"));
+            assert!(logs_contain("status_codeのみ記録"));
+            assert!(logs_contain("APIエラー"));
+            assert!(logs_contain("処理完了"));
         }
     }
 

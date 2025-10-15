@@ -13,6 +13,17 @@ mod test_support;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::net::IpAddr;
+use tracing::info;
+
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .try_init();
+}
 
 #[derive(Parser)]
 #[command(name = "datadoggo-v3-rss")]
@@ -48,6 +59,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
+
     let cli = Cli::parse();
 
     // 設定を読み込む
@@ -58,11 +71,11 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::FetchRss => {
-            println!("=== fetch-rss コマンドを実行 ===\n");
+            info!("=== fetch-rss コマンドを実行 ===");
             fetch_rss::run(pool, config.webhook_url.as_deref()).await?;
         }
         Commands::FetchContent { limit } => {
-            println!("=== fetch-content コマンドを実行 ===\n");
+            info!("=== fetch-content コマンドを実行 ===");
             fetch_content::run(
                 pool,
                 limit,
@@ -72,7 +85,7 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::Serve { host, port } => {
-            println!("=== APIサーバを起動 ===\n");
+            info!("=== APIサーバを起動 ===");
             let state = api::ApiState::new(
                 pool.clone(),
                 config.scraping_api_url.clone(),

@@ -22,8 +22,11 @@ once_cell = "1.19"
 axum = "0.7"
 base64 = "0.22"
 futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 [dev-dependencies]
 wiremock = "0.6"
 tower = { version = "0.4", features = ["util"] }
 hyper = "1"
+tracing-test = "0.2"

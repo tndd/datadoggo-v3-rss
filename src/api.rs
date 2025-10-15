@@ -10,6 +10,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
+use tracing::warn;
 
 use crate::articles::{find_article_cursor, search_articles_window};
 use crate::fetch_content::{execute_fetch_content, FetchContentSummary};
@@ -112,7 +113,7 @@ async fn fetch_rss_handler(State(state): State<ApiState>) -> ApiResult<Json<Fetc
         .map_err(internal_error)?;
 
     if let Err(e) = webhook::notify_fetch_rss(state.webhook_url.as_deref(), &summary, "api").await {
-        eprintln!("Webhook送信に失敗しました(fetch-rss): {}", e);
+        warn!(error = %e, "Webhook送信に失敗しました(fetch-rss)");
     }
 
     Ok(Json(summary))
@@ -137,7 +138,7 @@ async fn fetch_content_handler(
     if let Err(e) =
         webhook::notify_fetch_content(state.webhook_url.as_deref(), &summary, "api").await
     {
-        eprintln!("Webhook送信に失敗しました(fetch-content): {}", e);
+        warn!(error = %e, "Webhook送信に失敗しました(fetch-content)");
     }
 
     Ok(Json(summary))

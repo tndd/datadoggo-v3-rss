@@ -21,7 +21,7 @@ mod tests {
         let db_url = match std::env::var("TEST_DATABASE_URL") {
             Ok(url) => url,
             Err(_) => {
-                eprintln!("TEST_DATABASE_URLが未設定のためスキップ");
+                tracing::warn!("TEST_DATABASE_URLが未設定のためスキップ");
                 return;
             }
         };

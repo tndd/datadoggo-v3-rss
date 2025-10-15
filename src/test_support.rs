@@ -8,6 +8,7 @@ use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, MutexGuard};
+use tracing::warn;
 use uuid::Uuid;
 
 static DB_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -25,21 +26,21 @@ pub async fn prepare_test_pool() -> Result<PgPool> {
         if let Ok(database_url) = std::env::var("DATABASE_URL") {
             if let Some((prefix, _)) = database_url.rsplit_once('/') {
                 let fallback = format!("{}/test_datadoggo_v3", prefix);
-                eprintln!(
-                    "TEST_DATABASE_URLが未設定のためDATABASE_URLから派生した{}を使用します",
-                    fallback
+                warn!(
+                    fallback = %fallback,
+                    "TEST_DATABASE_URLが未設定のためDATABASE_URLから派生したURLを使用します"
                 );
                 std::env::set_var("TEST_DATABASE_URL", fallback);
             } else {
-                eprintln!("TEST_DATABASE_URLが未設定のためDATABASE_URLをそのまま使用します");
+                warn!("TEST_DATABASE_URLが未設定のためDATABASE_URLをそのまま使用します");
                 std::env::set_var("TEST_DATABASE_URL", database_url);
             }
         } else {
             let default_url =
                 "postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3";
-            eprintln!(
-                "TEST_DATABASE_URLが未設定のため既定値({})を使用します",
-                default_url
+            warn!(
+                default = default_url,
+                "TEST_DATABASE_URLが未設定のため既定値を使用します"
             );
             std::env::set_var("TEST_DATABASE_URL", default_url);
         }
