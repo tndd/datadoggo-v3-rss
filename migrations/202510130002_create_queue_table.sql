@@ -1,5 +1,4 @@
 -- queueテーブルとトリガーを完全に作り直し
-DROP TRIGGER IF EXISTS update_queue_updated_at ON rss.queue;
 DROP TABLE IF EXISTS rss.queue CASCADE;
 
 CREATE TABLE rss.queue (

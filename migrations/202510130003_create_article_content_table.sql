@@ -1,5 +1,4 @@
 -- article_contentテーブルとトリガーを完全に作り直し
-DROP TRIGGER IF EXISTS update_article_content_updated_at ON rss.article_content;
 DROP TABLE IF EXISTS rss.article_content CASCADE;
 
 CREATE TABLE rss.article_content (
