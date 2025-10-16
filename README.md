@@ -47,7 +47,7 @@ cp .env.example .env
 
 環境変数の説明：
 - `ENVIRONMENT`: 使用する環境を指定 (`TEST`/`STG`/`PROD`)
-  - デフォルトは `STG`（ステージング環境）
+  - デフォルトは `TEST`（テスト環境）
   - 環境に応じて自動的に適切なDB URLが選択される
 - `DATABASE_URL_TEST`: テスト環境のDB接続情報
 - `DATABASE_URL_STG`: ステージング環境のDB接続情報
@@ -57,11 +57,11 @@ cp .env.example .env
 
 環境の切り替え例：
 ```bash
-# ステージング環境で実行（デフォルト）
+# テスト環境で実行（デフォルト）
 cargo run -- fetch-rss
 
-# テスト環境で実行
-ENVIRONMENT=TEST cargo run -- fetch-rss
+# ステージング環境で実行
+ENVIRONMENT=STG cargo run -- fetch-rss
 
 # 本番環境で実行（PROD_CONFIRMEDも必要）
 ENVIRONMENT=PROD PROD_CONFIRMED=true cargo run -- fetch-rss

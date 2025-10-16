@@ -32,8 +32,8 @@ impl Config {
     /// 優先順位:
     /// 1. DATABASE_URL環境変数が直接指定されている場合はそれを使用
     /// 2. ENVIRONMENT環境変数に基づいて適切なURLを選択
-    ///    - TEST: DATABASE_URL_TEST
-    ///    - STG: DATABASE_URL_STG (デフォルト)
+    ///    - TEST: DATABASE_URL_TEST (デフォルト)
+    ///    - STG: DATABASE_URL_STG
     ///    - PROD: DATABASE_URL_PROD (PROD_CONFIRMED=trueが必要)
     fn get_database_url() -> Result<String> {
         // DATABASE_URLが直接指定されている場合は最優先
@@ -41,8 +41,8 @@ impl Config {
             return Ok(url);
         }
 
-        // ENVIRONMENTに基づいて適切なURLを選択
-        let environment = env::var("ENVIRONMENT").unwrap_or_else(|_| "STG".to_string());
+        // ENVIRONMENTに基づいて適切なURLを選択（デフォルトはTEST）
+        let environment = env::var("ENVIRONMENT").unwrap_or_else(|_| "TEST".to_string());
 
         let url = match environment.to_uppercase().as_str() {
             "TEST" => env::var("DATABASE_URL_TEST")
