@@ -19,33 +19,75 @@ cargo build
 
 ### 2. データベース設定
 
-PostgreSQLで以下を実行：
+Docker で PostgreSQL を起動：
 
-```sql
-DROP DATABASE IF EXISTS datadoggo_v3;
-CREATE DATABASE datadoggo_v3;
+```bash
+# 既存のコンテナを削除（存在する場合）
+docker rm -f postgres-docker
+
+# PostgreSQLコンテナを起動
+docker run -d \
+  --name postgres-docker \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_USER=postgres \
+  -p 5432:5432 \
+  postgres:16-alpine
+
+# test/stg/prod の3つのDBを作成
+docker exec -it postgres-docker psql -U postgres -c "CREATE DATABASE datadoggo_v3_test;"
+docker exec -it postgres-docker psql -U postgres -c "CREATE DATABASE datadoggo_v3_stg;"
+docker exec -it postgres-docker psql -U postgres -c "CREATE DATABASE datadoggo_v3_prod;"
 ```
 
-`.env`ファイルを編集してDB接続情報を設定：
+`.env`ファイルを編集してDB接続情報を設定（`.env.example`をコピー）：
 
-```env
-DATABASE_URL="postgresql://user:password@localhost:5432/datadoggo_v3"
-SCRAPING_API_URL="http://localhost:8000"
-# 送信先Webhookがある場合は設定（任意）
-# WEBHOOK_URL="https://example.com/webhook"
+```bash
+cp .env.example .env
+```
+
+環境変数の説明：
+- `ENVIRONMENT`: 使用する環境を指定 (`TEST`/`STG`/`PROD`)
+  - デフォルトは `STG`（ステージング環境）
+  - 環境に応じて自動的に適切なDB URLが選択される
+- `DATABASE_URL_TEST`: テスト環境のDB接続情報
+- `DATABASE_URL_STG`: ステージング環境のDB接続情報
+- `DATABASE_URL_PROD`: 本番環境のDB接続情報
+- `DATABASE_URL`: 直接指定する場合に使用（最優先、通常は空でOK）
+- `PROD_CONFIRMED`: 本番環境への安全装置（`ENVIRONMENT=PROD`の場合、`true`に設定が必要）
+
+環境の切り替え例：
+```bash
+# ステージング環境で実行（デフォルト）
+cargo run -- fetch-rss
+
+# テスト環境で実行
+ENVIRONMENT=TEST cargo run -- fetch-rss
+
+# 本番環境で実行（PROD_CONFIRMEDも必要）
+ENVIRONMENT=PROD PROD_CONFIRMED=true cargo run -- fetch-rss
 ```
 
 ### 3. マイグレーション実行
 
+ステージング環境用にマイグレーション実行：
+
 ```bash
 # schema作成
-psql -d datadoggo_v3 -f migrations/202510130001_create_schema.sql
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_stg < migrations/202510130001_create_schema.sql
 
 # queueテーブル作成
-psql -d datadoggo_v3 -f migrations/202510130002_create_queue_table.sql
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_stg < migrations/202510130002_create_queue_table.sql
 
 # article_contentテーブル作成
-psql -d datadoggo_v3 -f migrations/202510130003_create_article_content_table.sql
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_stg < migrations/202510130003_create_article_content_table.sql
+```
+
+テスト環境用にも同様に実行：
+
+```bash
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_test < migrations/202510130001_create_schema.sql
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_test < migrations/202510130002_create_queue_table.sql
+docker exec -i postgres-docker psql -U postgres -d datadoggo_v3_test < migrations/202510130003_create_article_content_table.sql
 ```
 
 ### 4. RSSフィード設定
@@ -125,23 +167,20 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 
 ### テスト実行
 
+セットアップ手順でDockerコンテナと環境変数を設定済みであれば、そのままテストを実行できます：
+
 ```bash
-# DockerでPostgreSQLを起動する例
-docker run -d \
-  --name postgres-docker \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_DB=testdb \
-  -p 5432:5432 \
-  postgres:16-alpine
-
-# テスト用環境変数を設定 (.envの値と揃える)
-export TEST_DATABASE_URL="postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3"
-
 cargo test
 ```
 
-データベースへ接続する統合テストでは `TEST_DATABASE_URL` を使用します。Dockerの例では上記の通り`.env`と同じ`postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3`を指定してください。環境変数が未設定の場合はテストが失敗するため、実行前に必ず設定してください。
+`.env`ファイルの`TEST_DATABASE_URL`が自動的に使用されます。
+
+手動でテスト用環境変数を設定する場合：
+
+```bash
+export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/datadoggo_v3_test"
+cargo test
+```
 
 ### コンパイルチェック
 
