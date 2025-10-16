@@ -1,5 +1,8 @@
--- queueテーブル作成
-CREATE TABLE IF NOT EXISTS rss.queue (
+-- queueテーブルとトリガーを完全に作り直し
+DROP TRIGGER IF EXISTS update_queue_updated_at ON rss.queue;
+DROP TABLE IF EXISTS rss.queue CASCADE;
+
+CREATE TABLE rss.queue (
     id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

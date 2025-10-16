@@ -37,7 +37,7 @@ pub async fn prepare_test_pool() -> Result<PgPool> {
             }
         } else {
             let default_url =
-                "postgresql://personal_tracker:personal_tracker@localhost:5432/test_datadoggo_v3";
+                "postgresql://postgres:postgres@localhost:5432/datadoggo_v3_test";
             warn!(
                 default = default_url,
                 "TEST_DATABASE_URLが未設定のため既定値を使用します"

@@ -1,5 +1,8 @@
--- article_contentテーブル作成
-CREATE TABLE IF NOT EXISTS rss.article_content (
+-- article_contentテーブルとトリガーを完全に作り直し
+DROP TRIGGER IF EXISTS update_article_content_updated_at ON rss.article_content;
+DROP TABLE IF EXISTS rss.article_content CASCADE;
+
+CREATE TABLE rss.article_content (
     queue_id UUID PRIMARY KEY REFERENCES rss.queue(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
