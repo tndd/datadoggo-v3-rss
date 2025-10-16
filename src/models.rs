@@ -18,6 +18,7 @@ pub struct Queue {
 }
 
 /// article_contentテーブルのモデル
+#[cfg(test)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ArticleContent {
     pub queue_id: Uuid,
